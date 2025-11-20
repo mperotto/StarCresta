@@ -2,10 +2,24 @@ import pygame
 import os
 from src.settings import *
 
+import sys
+
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 def _carregar_sprite(caminho, largura, altura, force_transparent=False):
     try:
-        if os.path.exists(caminho):
-            img = pygame.image.load(caminho)
+        # Resolve o caminho absoluto
+        full_path = get_resource_path(caminho)
+        if os.path.exists(full_path):
+            img = pygame.image.load(full_path)
             if force_transparent:
                 img = img.convert()
                 img.set_colorkey((0, 0, 0))
@@ -116,9 +130,10 @@ def carregar_sprite_powerup_vida(largura, altura):
 
 def carregar_som(nome, vol=0.35):
     caminho = os.path.join('sound', nome)
-    if os.path.exists(caminho):
+    full_path = get_resource_path(caminho)
+    if os.path.exists(full_path):
         try:
-            s = pygame.mixer.Sound(caminho)
+            s = pygame.mixer.Sound(full_path)
             s.set_volume(vol)
             return s
         except Exception:

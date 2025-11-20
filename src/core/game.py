@@ -3,7 +3,7 @@ import sys
 import math
 import os
 from src.settings import *
-from src.assets import carregar_som
+from src.assets import carregar_som, get_resource_path
 from src.sprites.player import Jogador
 from src.sprites.projectile import Tiro, SuperTiro
 from src.sprites.enemy import Asteroide
@@ -27,7 +27,27 @@ class Jogo:
             pass
         pygame.init()
         pygame.display.set_caption("StarCresta")
-        self.tela = pygame.display.set_mode((LARGURA, ALTURA), pygame.FULLSCREEN)
+        
+        # Detecta resolução do monitor
+        info = pygame.display.Info()
+        monitor_w, monitor_h = info.current_w, info.current_h
+        
+        # Define resolução alvo (mantendo aspect ratio se possível, ou usando nativa)
+        # Se o monitor for menor que 1920x1080, ajusta
+        if monitor_w < LARGURA or monitor_h < ALTURA:
+            self.largura_tela = monitor_w
+            self.altura_tela = monitor_h
+            # Recalcula SCALE para renderização (opcional, mas complexo pois afeta lógica)
+            # Melhor abordagem: Renderizar em surface interna 1920x1080 e escalar para tela
+            self.usar_escala = True
+        else:
+            self.largura_tela = LARGURA
+            self.altura_tela = ALTURA
+            self.usar_escala = False
+            
+        self.tela_real = pygame.display.set_mode((self.largura_tela, self.altura_tela), pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF)
+        self.tela = pygame.Surface((LARGURA, ALTURA)) # Surface interna lógica
+        
         self.relogio = pygame.time.Clock()
         self.fonte = pygame.font.SysFont(None, 22)
         self.fonte_grande = pygame.font.SysFont(None, 48)
@@ -96,8 +116,10 @@ class Jogo:
         self.music_path = None
         for cand in ['bg_loop.ogg', 'bg_loop.mp3', 'bg_loop.wav']:
             p = os.path.join('sound', cand)
-            if os.path.exists(p):
-                self.music_path = p
+            full_p = get_resource_path(p)
+            if os.path.exists(full_p):
+                self.music_path = full_p
+                break
                 break
         
         self.boss_music_path = None
