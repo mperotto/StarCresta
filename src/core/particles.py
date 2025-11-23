@@ -83,9 +83,34 @@ class Estrela:
     def desenhar(self, tela):
         pygame.draw.circle(tela, self.cor, (int(self.x), int(self.y)), self.raio)
 
+class Planeta:
+    def __init__(self, x, y, vel, raio, cor, halo):
+        self.x = float(x)
+        self.y = float(y)
+        self.vel = float(vel) * SCALE
+        self.raio = max(6, int(round(raio * SCALE)))
+        self.cor = cor
+        self.halo = halo
+
+    def atualizar(self, dt):
+        self.y += self.vel * dt
+        if self.y > ALTURA + self.raio:
+            self.y = -self.raio
+            self.x = random.uniform(0, LARGURA)
+
+    def desenhar(self, tela):
+        cx, cy = int(self.x), int(self.y)
+        # halo suave
+        pygame.draw.circle(tela, self.halo, (cx, cy), int(self.raio * 1.25))
+        # corpo
+        pygame.draw.circle(tela, self.cor, (cx, cy), self.raio)
+        # reflexo simples
+        pygame.draw.circle(tela, (255, 255, 255), (cx - self.raio//3, cy - self.raio//3), max(2, self.raio//4))
+
 class CampoEstrelas:
-    def __init__(self, quantidade=120):
+    def __init__(self, quantidade=120, planetas=3):
         self.estrelas = []
+        self.planetas = []
         for _ in range(quantidade):
             x = random.uniform(0, LARGURA)
             y = random.uniform(0, ALTURA)
@@ -94,11 +119,24 @@ class CampoEstrelas:
             raio = 1 + int(camada * 2)
             cor = (200 + int(55 * camada), 200 + int(55 * camada), 200 + int(55 * camada))
             self.estrelas.append(Estrela(x, y, vel, raio, cor))
+        for _ in range(planetas):
+            x = random.uniform(0, LARGURA)
+            y = random.uniform(0, ALTURA)
+            raio = random.uniform(18, 38)
+            vel = random.uniform(35, 60)
+            base = random.randint(80, 160)
+            cor = (base + 50, base + 30, base + 10)
+            halo = (base, base, base + 40)
+            self.planetas.append(Planeta(x, y, vel, raio, cor, halo))
 
     def atualizar(self, dt):
         for e in self.estrelas:
             e.atualizar(dt)
+        for p in self.planetas:
+            p.atualizar(dt)
 
     def desenhar(self, tela):
         for e in self.estrelas:
             e.desenhar(tela)
+        for p in self.planetas:
+            p.desenhar(tela)

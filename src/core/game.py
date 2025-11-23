@@ -2,11 +2,13 @@ import pygame
 import sys
 import math
 import os
+import random
 from src.settings import *
 from src.assets import carregar_som, get_resource_path
-from src.sprites.player import Jogador
+from src.sprites.player import Jogador, TargetModule
 from src.sprites.projectile import Tiro, SuperTiro
 from src.sprites.enemy import Asteroide
+from src.sprites.boss import Boss
 from src.core.managers import (
     GerenciadorDeTiros, 
     GerenciadorDeInimigos, 
@@ -59,6 +61,7 @@ class Jogo:
         self.jogador = Jogador(LARGURA/2 - 18, ALTURA - 80)
         self.tiros = GerenciadorDeTiros()
         self.inimigos = GerenciadorDeInimigos()
+        self.inimigos.spawn_delay = 1.0
         self.particulas = GerenciadorDeParticulas()
         # menos estrelas no fundo (metade do anterior)
         estrelas_qtd = int(70 * (LARGURA/BASE_LARGURA) * (ALTURA/BASE_ALTURA) / 1.0)
@@ -96,6 +99,19 @@ class Jogo:
         self.game_over_fx_emit = 0.0
         # textos flutuantes (ex.: "+1 VIDA")
         self.fx_texts = []
+        self.entering_initials = False
+        self.initials_input = ""
+        self.new_score_registered = False
+        self.boss_spawn_index = 0
+        self.boss_cleared = 0
+        self.laser_wave_expire = None
+        self.laser_beam_timer = 0.0
+        self.laser_beam_active = False
+        
+        # Variáveis de acoplamento
+        self.target_module = None
+        self.docking_timer = 0.0
+        self.docking_success = False
 
     def _carregar_audio(self):
         self.sfx_shot = carregar_som('laser1.wav', 0.28) or carregar_som('shot.wav', 0.28)
@@ -141,7 +157,7 @@ class Jogo:
 
     def reiniciar(self):
         self.pontuacao = 0
-        self.vidas = 3
+        self.vidas = VIDAS_INICIAIS
         self.jogador = Jogador(LARGURA/2 - 18, ALTURA - 80)
         self.tiros = GerenciadorDeTiros()
         self.inimigos = GerenciadorDeInimigos()
@@ -170,6 +186,95 @@ class Jogo:
         # reiniciar música normal
         self._tocar_musica(self.music_path)
         self.estado = 'jogando'
+
+# ... (inside atualizar)
+
+        # Spawn automático do Boss (ex: a cada 5 ondas ou tempo)
+        # Se onda > 0 e múltiplo de 5, e boss ainda não spawnou nesta sequência
+        if self.inimigos.onda > 0 and self.inimigos.onda % BOSS_WAVE_INTERVAL == 0:
+            if not self.boss_spawned and not self.inimigos.boss_ativo and self.estado == 'jogando':
+                self.inimigos.spawnar_boss()
+                self.boss_spawned = True
+                if self.boss_music_path:
+                    self._tocar_musica(self.boss_music_path)
+
+
+        # Boss morto: explosão épica e volta música normal
+        if getattr(self.inimigos, 'boss_killed', False):
+            self.inimigos.boss_killed = False
+            pos = getattr(self.inimigos, 'boss_killed_pos', None)
+            self.inimigos.boss_killed_pos = None
+            self.boss_spawned = False  # Permite spawn de novo boss
+            
+            # Explosão épica
+            if pos is not None:
+                cx, cy = pos
+            else:
+                cx = LARGURA // 2
+                cy = 100
+                
+            # Múltiplas ondas de partículas
+            for i in range(3):
+                intensidade = 40 - i * 8
+                raio = 50 + i * 20
+                cores = [(255, 150, 50), (255, 200, 100), (255, 255, 200)]
+                self.particulas.spawn_ao_redor(cx, cy, intensidade=intensidade, raio=raio, cores=cores, vel_base=120, vel_var=180)
+            
+            # Som de explosão grande (volume maior para o boss)
+            if hasattr(self, 'sfx_explosion_big') and self.sfx_explosion_big:
+                try:
+                    # Aumenta temporariamente o volume para o boss
+                    original_vol = self.sfx_explosion_big.get_volume()
+                    self.sfx_explosion_big.set_volume(0.8)
+                    self.sfx_explosion_big.play()
+                    # Restaura volume original após 100ms (aproximado)
+                    self.sfx_explosion_big.set_volume(original_vol)
+                except Exception:
+                    pass
+            
+            # Volta música normal
+            try:
+                pygame.mixer.music.stop()
+            except Exception:
+                pass
+            if self.music_path:
+                self._tocar_musica(self.music_path)
+            
+            # Pontuação bônus
+            self.pontuacao += PONTOS_BONUS_BOSS
+            
+            # Inicia celebração antes do acoplamento
+            if self.jogador.stage < 3:
+                self.estado = 'celebration'
+                self.celebration_timer = 3.0 # 3 segundos de comemoração
+                self.inimigos.inimigos.clear()
+                self.tiros.tiros.clear()
+                self.tiros_inimigos.tiros.clear()
+                self.destrocos.destrocos.clear()
+            else:
+                # Continua jogo normal
+                pass
+
+# ... (inside sucesso_acoplamento)
+
+    def sucesso_acoplamento(self):
+        self.jogador.stage += 1
+        self.jogador.vida = VIDAS_INICIAIS # Recupera vida? Opcional
+        self.pontuacao += PONTOS_POR_ACOPLAMENTO
+        self.estado = 'jogando'
+        self.target_module = None
+        
+        # Reseta gerenciador de inimigos para reiniciar ondas
+        self.inimigos.boss_ativo = False
+        self.inimigos.boss_killed = False
+        self.inimigos.resetar_spawn(atraso=2.0) # Reinicia dificuldade/ondas com respiro
+        self.inimigos.inimigos.clear() # Garante limpo
+        self.boss_spawned = False
+        
+        # Som de powerup
+        if hasattr(self, 'sfx_powerup'):
+            try: self.sfx_powerup.play()
+            except: pass
 
     def lidar_com_eventos(self):
         for evento in pygame.event.get():
@@ -228,6 +333,13 @@ class Jogo:
                         # Trocar música para boss
                         if self.boss_music_path:
                             self._tocar_musica(self.boss_music_path)
+                # Debug: Kill Boss com tecla K
+                if evento.type == pygame.KEYDOWN and evento.key == pygame.K_k:
+                    if self.boss_spawned:
+                        bosses = [i for i in self.inimigos.inimigos if isinstance(i, Boss)]
+                        for b in bosses:
+                            b.receber_dano(9999) # Garante morte
+
 
             elif self.estado == 'pausado':
                 if evento.type == pygame.KEYDOWN:
@@ -273,6 +385,15 @@ class Jogo:
         if self.estado == 'menu':
             return
 
+        # Estados que não são de jogo ativo mas precisam de update específico
+        if self.estado == 'docking':
+            self.atualizar_acoplamento(dt)
+            return
+            
+        if self.estado == 'celebration':
+            self.atualizar_celebracao(dt)
+            return
+
         if self.estado != 'jogando':
             # Atualiza FX de Game Over (explosão lenta)
             if getattr(self, 'game_over_fx_active', False):
@@ -309,14 +430,6 @@ class Jogo:
             # Mas se for temporário, deveria reduzir aqui. 
             # O código original do 'v' aumenta self.jogador.nivel_arma.
             # Vamos assumir que o timer é apenas visual ou para um estado 'powered up' futuro.
-            
-        # Spawn do Boss
-        if self.pontuacao >= 500 and not self.boss_spawned:
-            self.inimigos.spawnar_boss()
-            self.boss_spawned = True
-            # Trocar música para boss
-            if self.boss_music_path:
-                self._tocar_musica(self.boss_music_path)
             
         self.jogador.atualizar(dt)
         self.tiros.atualizar(dt)
@@ -387,8 +500,19 @@ class Jogo:
                 if isinstance(inimigo, Asteroide) and self.player_shield_timer > 0:
                     inimigo = None
             if inimigo:
-                inimigo.matar()
-                self.vidas -= 1
+                # chefão não morre por colisão com o jogador
+                if not isinstance(inimigo, Boss):
+                    inimigo.matar()
+                
+                # Tenta reduzir estágio primeiro
+                perdeu_vida = self.jogador.receber_dano()
+                
+                if perdeu_vida:
+                    self.vidas -= 1
+                else:
+                    self.invul_timer = 2.0 # Invencibilidade ao perder parte
+                    
+                # som de dano
                 # som de dano
                 if hasattr(self, 'sfx_damage') and self.sfx_damage:
                     try:
@@ -447,7 +571,14 @@ class Jogo:
                     if d.retangulo.colliderect(self.jogador.retangulo):
                         if self.player_shield_timer > 0:
                             continue
-                        self.vidas -= 1
+                        
+                        # Tenta reduzir estágio primeiro
+                        perdeu_vida = self.jogador.receber_dano()
+                        if perdeu_vida:
+                            self.vidas -= 1
+                        else:
+                            self.invul_timer = 2.0
+                            
                         cx = self.jogador.x + self.jogador.largura/2
                         cy = self.jogador.y + self.jogador.altura/2
                         self.particulas.spawn_ao_redor(cx, cy, intensidade=20, raio=28,
@@ -577,28 +708,46 @@ class Jogo:
                     self.sfx_powerup.play()
                 except Exception:
                     pass
+        
+        # Spawn automático do Boss (ex: a cada 5 ondas ou tempo)
+        # Se onda > 0 e múltiplo de 5, e boss ainda não spawnou nesta sequência
+        if self.inimigos.onda > 0 and self.inimigos.onda % BOSS_WAVE_INTERVAL == 0:
+            if not self.boss_spawned and not self.inimigos.boss_ativo and self.estado == 'jogando':
+                self.inimigos.spawnar_boss()
+                self.boss_spawned = True
+                if self.boss_music_path:
+                    self._tocar_musica(self.boss_music_path)
 
         # Boss morto: explosão épica e volta música normal
+        boss_dead_event = False
+        pos = None
         if getattr(self.inimigos, 'boss_killed', False):
             self.inimigos.boss_killed = False
             pos = getattr(self.inimigos, 'boss_killed_pos', None)
             self.inimigos.boss_killed_pos = None
+            boss_dead_event = True
+        else:
+            boss_alive = any(isinstance(i, Boss) and not i.esta_morto() for i in self.inimigos.inimigos)
+            if self.boss_spawned and (not boss_alive) and not self.inimigos.boss_ativo:
+                boss_dead_event = True
+
+        if boss_dead_event:
             self.boss_spawned = False  # Permite spawn de novo boss
-            
+
             # Explosão épica
             if pos is not None:
                 cx, cy = pos
             else:
                 cx = LARGURA // 2
                 cy = 100
-                
+
             # Múltiplas ondas de partículas
             for i in range(3):
                 intensidade = 40 - i * 8
                 raio = 50 + i * 20
                 cores = [(255, 150, 50), (255, 200, 100), (255, 255, 200)]
                 self.particulas.spawn_ao_redor(cx, cy, intensidade=intensidade, raio=raio, cores=cores, vel_base=120, vel_var=180)
-            
+
             # Som de explosão grande (volume maior para o boss)
             if hasattr(self, 'sfx_explosion_big') and self.sfx_explosion_big:
                 try:
@@ -610,7 +759,7 @@ class Jogo:
                     self.sfx_explosion_big.set_volume(original_vol)
                 except Exception:
                     pass
-            
+
             # Volta música normal
             try:
                 pygame.mixer.music.stop()
@@ -618,9 +767,25 @@ class Jogo:
                 pass
             if self.music_path:
                 self._tocar_musica(self.music_path)
-            
+
             # Pontuação bônus
             self.pontuacao += 500
+
+            # Inicia celebração antes do acoplamento
+            if self.jogador.stage < 3:
+                self.estado = 'celebration'
+                self.celebration_timer = 3.0 # 3 segundos de comemoração
+                self.inimigos.inimigos.clear()
+                self.tiros.tiros.clear()
+                self.tiros_inimigos.tiros.clear()
+                self.destrocos.destrocos.clear()
+            else:
+                # Continua jogo normal
+                pass
+
+        if self.estado == 'docking':
+            self.atualizar_acoplamento(dt)
+            return
 
         # inimigos atiradores disparam
         asts = [i for i in self.inimigos.inimigos if isinstance(i, Asteroide)]
@@ -636,7 +801,12 @@ class Jogo:
             for t in self.tiros_inimigos.tiros:
                 if t.retangulo.colliderect(self.jogador.retangulo):
                     if self.player_shield_timer <= 0:
-                        self.vidas -= 1
+                        perdeu_vida = self.jogador.receber_dano()
+                        if perdeu_vida:
+                            self.vidas -= 1
+                        else:
+                            # perdeu estágio, mas ainda tem vidas
+                            self.invul_timer = 2.0
                         cx = self.jogador.x + self.jogador.largura/2
                         cy = self.jogador.y + self.jogador.altura/2
                         if self.vidas <= 0:
@@ -670,7 +840,7 @@ class Jogo:
                             if hasattr(self, 'sfx_explosion_small') and self.sfx_explosion_small:
                                 try: self.sfx_explosion_small.play()
                                 except Exception: pass
-                            self.invul_timer = 1.8
+                            self.invul_timer = max(self.invul_timer, 1.8)
                             # traz nave de baixo e anima subida
                             self.jogador.y = ALTURA + 30
                             try:
@@ -705,6 +875,43 @@ class Jogo:
         
         if self.estado == 'menu':
             self.menu.desenhar(self.tela)
+            # Desenha a surface lógica na tela real (com escala se necessário)
+            if self.usar_escala:
+                pygame.transform.scale(self.tela, (self.largura_tela, self.altura_tela), self.tela_real)
+            else:
+                self.tela_real.blit(self.tela, (0, 0))
+            pygame.display.flip()
+            return
+
+        if self.estado == 'celebration':
+            self.jogador.desenhar(self.tela)
+            
+            # Texto de comemoração
+            txt = self.fonte_grande.render("BOSS DESTROYED!", True, (255, 215, 0))
+            self.tela.blit(txt, (LARGURA//2 - txt.get_width()//2, ALTURA//2 - 40))
+            
+            # Desenha a surface lógica na tela real (com escala se necessário)
+            if self.usar_escala:
+                pygame.transform.scale(self.tela, (self.largura_tela, self.altura_tela), self.tela_real)
+            else:
+                self.tela_real.blit(self.tela, (0, 0))
+            pygame.display.flip()
+            return
+
+        if self.estado == 'docking':
+            self.jogador.desenhar(self.tela)
+            if self.target_module:
+                self.target_module.desenhar(self.tela)
+            
+            # Texto de instrução
+            txt = self.fonte.render("ACOPLAR! ALINHE O CENTRO", True, (0, 255, 0))
+            self.tela.blit(txt, (LARGURA//2 - txt.get_width()//2, ALTURA//2))
+            
+            # Desenha a surface lógica na tela real (com escala se necessário)
+            if self.usar_escala:
+                pygame.transform.scale(self.tela, (self.largura_tela, self.altura_tela), self.tela_real)
+            else:
+                self.tela_real.blit(self.tela, (0, 0))
             pygame.display.flip()
             return
 
@@ -802,6 +1009,12 @@ class Jogo:
             self.tela.blit(t1, (LARGURA//2 - t1.get_width()//2, ALTURA//2 - 50))
             self.tela.blit(t2, (LARGURA//2 - t2.get_width()//2, ALTURA//2 + 0))
             self.tela.blit(t3, (LARGURA//2 - t3.get_width()//2, ALTURA//2 + 30))
+        # Desenha a surface lógica na tela real (com escala se necessário)
+        if self.usar_escala:
+            pygame.transform.scale(self.tela, (self.largura_tela, self.altura_tela), self.tela_real)
+        else:
+            self.tela_real.blit(self.tela, (0, 0))
+            
         pygame.display.flip()
 
     def executar(self):
@@ -821,21 +1034,29 @@ class Jogo:
             except Exception:
                 pass
         # padrão: sem upgrade = 1 tiro reto; com upgrade = V + reto (3 tiros)
-        base_ang = math.radians(12)
+        base_ang = math.radians(10)
+        angulos = [0.0]
         if self.upgrade_super_timer > 0:
             angulos = [-base_ang, 0.0, +base_ang]
-        else:
-            angulos = [0.0]
 
         # posição central do cano
         cx = self.jogador.x + self.jogador.largura/2
         topy = self.jogador.y - 18
         speed = abs(VELOCIDADE_TIRO)
-        for ang in angulos:
-            vx = speed * math.sin(ang)
-            vy = -speed * math.cos(ang)
-            # centraliza cada supertiro (24px de largura)
-            self.tiros.criar(SuperTiro(cx - 12, topy, vx=vx, vy=vy))
+
+        # offsets por estágio (mais canhões quando acoplado)
+        if self.jogador.stage >= 3:
+            offsets = [-12, 0, +12]
+        elif self.jogador.stage == 2:
+            offsets = [-8, +8]
+        else:
+            offsets = [0]
+
+        for off in offsets:
+            for ang in angulos:
+                vx = speed * math.sin(ang)
+                vy = -speed * math.cos(ang)
+                self.tiros.criar(SuperTiro(cx + off - 12, topy, vx=vx, vy=vy))
 
     def disparar_normal(self):
         # define recarga do tiro normal
@@ -849,12 +1070,159 @@ class Jogo:
         cx = self.jogador.x + self.jogador.largura/2
         topy = self.jogador.y - 12
         speed = abs(VELOCIDADE_TIRO)
-        base_ang = math.radians(12)
+        base_ang = math.radians(10)
+        angulos = [0.0]
         if self.upgrade_super_timer > 0:
             angulos = [-base_ang, 0.0, +base_ang]
+
+        # offsets por estágio (mais canhões quando acoplado)
+        if self.jogador.stage >= 3:
+            offsets = [-12, 0, +12]
+        elif self.jogador.stage == 2:
+            offsets = [-8, +8]
         else:
-            angulos = [0.0]
-        for ang in angulos:
-            vx = speed * math.sin(ang)
-            vy = -speed * math.cos(ang)
-            self.tiros.criar(Tiro(cx - 3, topy, vx=vx, vy=vy))
+            offsets = [0]
+
+        for off in offsets:
+            for ang in angulos:
+                vx = speed * math.sin(ang)
+                vy = -speed * math.cos(ang)
+                self.tiros.criar(Tiro(cx + off - 3, topy, vx=vx, vy=vy))
+
+    def atualizar_celebracao(self, dt):
+        self.fundo.atualizar(dt)
+        self.particulas.atualizar(dt)
+        self.jogador.atualizar(dt)
+        
+        self.celebration_timer -= dt
+        if self.celebration_timer <= 0:
+            self.iniciar_acoplamento()
+
+    def iniciar_acoplamento(self):
+        self.estado = 'docking'
+        # Limpa inimigos e tiros
+        self.inimigos.inimigos.clear()
+        self.tiros.tiros.clear()
+        self.tiros_inimigos.tiros.clear()
+        self.destrocos.destrocos.clear()
+        
+        # Posiciona jogador na parte inferior
+        self.jogador.x = LARGURA / 2 - self.jogador.largura / 2
+        self.jogador.y = ALTURA - 100
+        
+        # Cria módulo alvo no topo
+        target_stage = self.jogador.stage + 1
+        self.target_module = TargetModule(LARGURA / 2 - S(36)/2, 50, target_stage)
+
+        self.docking_timer = 0.0
+        self.docking_success = False
+        
+        # Som de alerta/sirene
+        if hasattr(self, 'sfx_ufo') and self.sfx_ufo:
+            try: self.sfx_ufo.play()
+            except: pass
+
+    def atualizar_acoplamento(self, dt):
+        self.fundo.atualizar(dt)
+        self.particulas.atualizar(dt)
+        
+        # Move jogador (apenas horizontalmente)
+        teclas = pygame.key.get_pressed()
+        dx = (teclas[pygame.K_RIGHT] - teclas[pygame.K_LEFT]) * VELOCIDADE_JOGADOR * dt
+        
+        self.jogador.x = max(0, min(LARGURA - self.jogador.largura, self.jogador.x + dx))
+        # Trava Y na parte inferior
+        self.jogador.y = ALTURA - self.jogador.altura - 10
+        self.jogador.sincronizar_retangulo()
+
+        # Move alvo
+        if self.target_module:
+            if teclas[pygame.K_SPACE] and self.target_module.y > ALTURA / 2:
+                self.target_module.aplicar_retro(dt)
+            self.target_module.atualizar(dt)
+            
+            # Checa colisão/alinhamento
+            if self.jogador.retangulo.colliderect(self.target_module.retangulo):
+                # Verifica alinhamento horizontal preciso (tolerância de 10px)
+                center_diff = abs((self.jogador.x + self.jogador.largura/2) - (self.target_module.x + self.target_module.largura/2))
+                if center_diff < 10:
+                    self.sucesso_acoplamento()
+                    return
+                else:
+                    # Colisão desalinhada = explosão das duas naves
+                    self.falha_acoplamento_explosao()
+                    return
+            
+            # Se passar do jogador (perdeu a chance)
+            if self.target_module.y > ALTURA:
+                self.falha_acoplamento()
+
+    def sucesso_acoplamento(self):
+        self.jogador.stage += 1
+        self.jogador.vida = 3 # Recupera vida? Opcional
+        self.pontuacao += 1000
+        self.estado = 'jogando'
+        self.target_module = None
+        
+        # Reseta gerenciador de inimigos para reiniciar ondas
+        self.inimigos.boss_ativo = False
+        self.inimigos.boss_killed = False
+        self.inimigos.tempo_total = 0.0 # Reinicia dificuldade/ondas
+        self.inimigos.onda = 0
+        self.inimigos.inimigos.clear() # Garante limpo
+        self.boss_spawned = False
+        
+        # Som de powerup
+        if hasattr(self, 'sfx_powerup'):
+            try: self.sfx_powerup.play()
+            except: pass
+            
+    def falha_acoplamento(self):
+        self.estado = 'jogando'
+        self.target_module = None
+        self.inimigos.boss_ativo = False
+        self.inimigos.boss_killed = False
+        self.inimigos.resetar_spawn(atraso=2.5)
+        self.inimigos.inimigos.clear()
+        self.boss_spawned = False
+        # Som de erro?
+
+    def falha_acoplamento_explosao(self):
+        # Explosão no jogador e no módulo
+        cx_p = self.jogador.x + self.jogador.largura/2
+        cy_p = self.jogador.y + self.jogador.altura/2
+        cx_m = self.target_module.x + self.target_module.largura/2
+        cy_m = self.target_module.y + self.target_module.altura/2
+        
+        # Partículas
+        cores = [(255, 100, 50), (255, 200, 100), (255, 255, 255)]
+        self.particulas.spawn_ao_redor(cx_p, cy_p, intensidade=30, raio=40, cores=cores, vel_base=100, vel_var=150)
+        self.particulas.spawn_ao_redor(cx_m, cy_m, intensidade=30, raio=40, cores=cores, vel_base=100, vel_var=150)
+        
+        # Som
+        if hasattr(self, 'sfx_explosion_big'):
+            try: self.sfx_explosion_big.play()
+            except: pass
+            
+        # Penalidade: Perde uma vida e reseta para estágio anterior (ou perde estágio e vida)
+        self.vidas -= 1
+        self.jogador.stage = max(1, self.jogador.stage - 1)
+
+        self.target_module = None
+        self.estado = 'jogando'
+        self.inimigos.boss_ativo = False
+        self.inimigos.boss_killed = False
+        self.inimigos.resetar_spawn(atraso=2.5)
+        self.inimigos.inimigos.clear()
+        self.boss_spawned = False
+
+        # Se vidas zeraram, game over será tratado no próximo update
+        if self.vidas > 0:
+            # Respawn anim
+            self.invul_timer = 2.0
+            self.jogador.y = ALTURA + 30
+            self.jogador.spawn_anim = 1.2
+            
+            # Reseta inimigos também para dar um respiro
+            self.inimigos.inimigos.clear()
+

@@ -25,7 +25,7 @@ class GerenciadorDeTiros:
 class GerenciadorDeTirosInimigos:
     def __init__(self):
         self.tiros = []
-        self.cap_tiros = 18
+        self.cap_tiros = MAX_TIROS_INIMIGOS
 
     def criar(self, tiro):
         # limita o número de projéteis inimigos ativos para reduzir poluição visual
@@ -59,6 +59,7 @@ class GerenciadorDeInimigos:
         self.tempo_total = 0.0
         self.ufo_cd = random.uniform(16.0, 28.0)
         self.shot_mult = 1.0
+        self.spawn_delay = 0.0
         # recompensa por UFO abatido
         self.ufo_killed = False
         self.ufo_killed_pos = None
@@ -77,8 +78,12 @@ class GerenciadorDeInimigos:
         self.criar(Boss(LARGURA/2 - 64, -150))
 
     def atualizar(self, dt):
-        self.tempo_total += dt
-        self.tempo += dt
+        # Tempo de respiro após eventos (acoplamento/falha)
+        if self.spawn_delay > 0.0:
+            self.spawn_delay = max(0.0, self.spawn_delay - dt)
+        else:
+            self.tempo_total += dt
+            self.tempo += dt
         
         # Se boss ativo, não spawna inimigos comuns
         if not self.boss_ativo:
@@ -138,6 +143,14 @@ class GerenciadorDeInimigos:
     def desenhar(self, tela):
         for inimigo in self.inimigos:
             inimigo.desenhar(tela)
+
+    def resetar_spawn(self, atraso=0.0):
+        # Reinicia contadores de ondas após eventos como acoplamento ou falha
+        self.tempo_total = 0.0
+        self.tempo = 0.0
+        self.onda = 0
+        self.ufo_cd = random.uniform(16.0, 28.0)
+        self.spawn_delay = max(0.0, atraso)
 
     def verificar_colisoes_com_tiros(self, gerenciador_de_tiros, destrocos=None):
         # Retorna quantos inimigos morreram neste passo

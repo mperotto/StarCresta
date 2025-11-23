@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "c:\Users\usuario\examplegamepoo\main.py", line 7, in <module>
+    Jogo().executar()
+    ~~~~~~~~~~~~~~~^^
+  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 1008, in executar
+    self.atualizar(dt)
+    ~~~~~~~~~~~~~~^^^^
+  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 385, in atualizar
+    self.atualizar_celebracao(dt)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Jogo' object has no attribute 'atualizar_celebracao'
