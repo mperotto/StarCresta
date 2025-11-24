@@ -934,6 +934,7 @@ class Jogo:
             # Texto de comemoração
             txt = self.fonte_grande.render("BOSS DESTROYED!", True, (255, 215, 0))
             self.tela.blit(txt, (LARGURA//2 - txt.get_width()//2, ALTURA//2 - 40))
+            self._desenhar_banner_fase()
             
             # Desenha a surface lógica na tela real (com escala se necessário)
             if self.usar_escala:
@@ -953,6 +954,7 @@ class Jogo:
             txt2 = self.fonte.render("Pressione ESPACO para retrofoguetes", True, (200, 230, 255))
             self.tela.blit(txt2, (LARGURA//2 - txt2.get_width()//2, ALTURA//2 + 24))
             self.tela.blit(txt, (LARGURA//2 - txt.get_width()//2, ALTURA//2))
+            self._desenhar_banner_fase()
             
             # Desenha a surface lógica na tela real (com escala se necessário)
             if self.usar_escala:
