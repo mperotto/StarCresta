@@ -111,6 +111,14 @@ class Jogador(ObjetoDeJogo):
             pos_y = self.y + i * h_parte
             tela.blit(spr, (self.x, pos_y))
 
+    def get_segment_rects(self):
+        h_parte = S(24)
+        rects = []
+        for i in range(self.stage):
+            r = pygame.Rect(int(self.x), int(self.y + i * h_parte), self.largura, h_parte)
+            rects.append(r)
+        return rects
+
     def pode_atirar(self): return self.tempo_recarga <= 0
     
     def atirar(self):
@@ -132,6 +140,7 @@ class Jogador(ObjetoDeJogo):
         return tiros
 
     def atirar_super(self):
+        # recarga padrão do super; pode ser zerada externamente se precisar
         self.tempo_recarga = 0.8
         return SuperTiro(self.x + self.largura/2 - 12, self.y - 18)
 

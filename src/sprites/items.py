@@ -10,7 +10,20 @@ class Upgrade(ObjetoDeJogo):
         super().__init__(x, y, S(18), S(18))
         self.velocidade = velocidade * SCALE
         self.cor = (140, 200, 255)
-        self.tipo = tipo  # 'v', 'shield', 'health'
+        self.tipo = tipo  # 'v', 'shield', 'health', 'laser'
+        self.label = tipo.upper()[:1]
+        if tipo == 'health':
+            self.base_color = (120, 255, 160)
+            self.glow_color = (80, 200, 120)
+        elif tipo == 'shield':
+            self.base_color = (120, 200, 255)
+            self.glow_color = (80, 150, 220)
+        elif tipo == 'laser':
+            self.base_color = (255, 120, 230)
+            self.glow_color = (200, 70, 200)
+        else:  # 'v' padrão
+            self.base_color = (255, 200, 80)
+            self.glow_color = (220, 140, 40)
         
         # escolhe sprite por tipo
         if tipo == 'health':
@@ -25,10 +38,30 @@ class Upgrade(ObjetoDeJogo):
         self.sincronizar_retangulo()
 
     def desenhar(self, tela):
-        if self.sprite is not None:
+        cx = int(self.retangulo.centerx)
+        cy = int(self.retangulo.centery)
+        # glow suave pulsante para health, mais discreto para outros
+        pulse = 0.5 + 0.5 * math.sin(pygame.time.get_ticks() * 0.008)
+        glow_r = max(self.largura, self.altura)//2 + 6
+        alpha = int(80 + 60 * pulse) if self.tipo == 'health' else 60
+        try:
+            surf = pygame.Surface((glow_r*2+4, glow_r*2+4), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (*self.glow_color, alpha), (glow_r+2, glow_r+2), glow_r)
+            tela.blit(surf, (cx - glow_r - 2, cy - glow_r - 2))
+        except Exception:
+            pygame.draw.circle(tela, self.glow_color, (cx, cy), glow_r)
+        # corpo
+        if self.sprite is not None and self.tipo == 'health':
             tela.blit(self.sprite, self.retangulo.topleft)
         else:
-            pygame.draw.rect(tela, self.cor, self.retangulo, border_radius=4)
+            pygame.draw.rect(tela, self.base_color, self.retangulo, border_radius=4)
+        # letra identificadora
+        try:
+            fonte = pygame.font.SysFont(None, 16)
+            txt = fonte.render(self.label, True, (20, 20, 30))
+            tela.blit(txt, txt.get_rect(center=(cx, cy)))
+        except Exception:
+            pass
 
 class Destroco(ObjetoDeJogo):
     def __init__(self, x, y, raio=6, vx=0.0, vy=0.0, origin='env'):

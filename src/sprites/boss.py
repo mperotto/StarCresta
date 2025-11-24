@@ -15,6 +15,13 @@ class Boss(Inimigo):
         self.alvo_y = 80
         self.velocidade_x = 100 * SCALE
         self.direcao_x = 1
+        # mergulho/agressividade
+        self.allow_dive = False
+        self.dive_cooldown = random.uniform(5.0, 8.0)
+        self.dive_target_y = ALTURA * 0.78
+        self.dive_speed = 320 * SCALE
+        self.dive_target_x = None
+        
         
         # Sistema de ataque
         self.cd_ataque = 2.0
@@ -68,6 +75,15 @@ class Boss(Inimigo):
                 self.estado = 'atacando'
                 self.tempo_estado = 0.0
                 self.padrao_atual = random.randint(0, 2) # 0: Spread, 1: Laser/Rápido, 2: Chuva
+            
+            # mergulho ocasional em fases avancadas
+            if self.allow_dive:
+                self.dive_cooldown -= dt
+                if self.dive_cooldown <= 0:
+                    self.estado = 'mergulho'
+                    self.dive_cooldown = random.uniform(5.0, 8.0)
+                    self.dive_target_x = getattr(self, 'target_player_x', self.x + self.largura/2)
+                    self.tempo_estado = 0.0
                 
         elif self.estado == 'atacando':
             # Continua movendo enquanto ataca (ou para, dependendo do design)
@@ -85,6 +101,23 @@ class Boss(Inimigo):
             if self.tempo_estado > duracao_ataque:
                 self.estado = 'ocioso'
                 self.tempo_estado = 0.0
+        elif self.estado == 'mergulho':
+            target_x = self.dive_target_x if self.dive_target_x is not None else (self.x + self.largura/2)
+            dir_x = 1 if target_x > self.x else -1
+            self.x += dir_x * self.dive_speed * 0.4 * dt
+            self.y += self.dive_speed * dt
+            target_angle = -self.max_angulo * dir_x
+            if self.y >= self.dive_target_y:
+                self.estado = 'subindo'
+                self.tempo_estado = 0.0
+        elif self.estado == 'subindo':
+            self.y -= self.dive_speed * 0.9 * dt
+            self.x = max(0, min(LARGURA - self.largura, self.x))
+            if self.y <= self.alvo_y:
+                self.y = self.alvo_y
+                self.estado = 'ocioso'
+                self.tempo_estado = 0.0
+                target_angle = 0.0
 
         # Atualiza ângulo suavemente
         diff = target_angle - self.angulo

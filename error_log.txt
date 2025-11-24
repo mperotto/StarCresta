@@ -2,10 +2,13 @@ Traceback (most recent call last):
   File "c:\Users\usuario\examplegamepoo\main.py", line 7, in <module>
     Jogo().executar()
     ~~~~~~~~~~~~~~~^^
-  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 1008, in executar
+  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 1148, in executar
     self.atualizar(dt)
     ~~~~~~~~~~~~~~^^^^
-  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 385, in atualizar
-    self.atualizar_celebracao(dt)
-    ^^^^^^^^^^^^^^^^^^^^^^^^^
-AttributeError: 'Jogo' object has no attribute 'atualizar_celebracao'
+  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 504, in atualizar
+    self.inimigos.atualizar(dt)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^
+  File "c:\Users\usuario\examplegamepoo\src\core\managers.py", line 95, in atualizar
+    self.shot_mult = min(1.5, 1.0 + self.tempo_total * 0.01 + fase_boss * 0.05)
+                                                              ^^^^^^^^^
+UnboundLocalError: cannot access local variable 'fase_boss' where it is not associated with a value

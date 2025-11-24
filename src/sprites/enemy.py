@@ -227,6 +227,7 @@ class Asteroide(Inimigo):
             self.base_sprite = random.choice(sprites) if sprites else None
             self.sincronizar_retangulo()
         else:
+            # tiny agora pode ser destruído
             self.matar()
 
     def desenhar(self, tela):

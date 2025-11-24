@@ -66,16 +66,20 @@ class GerenciadorDeInimigos:
         self.boss_ativo = False
         self.boss_killed = False
         self.boss_killed_pos = None
+        self.fase = 1  # atualizado externamente para progressão
 
     def criar(self, inimigo):
         self.inimigos.append(inimigo)
 
-    def spawnar_boss(self):
+    def spawnar_boss(self, quantidade=1, fase=1):
         self.boss_ativo = True
-        # Limpa inimigos menores para o duelo (opcional, mas justo)
-        # self.inimigos = [] 
-        # Vamos manter os que já estão na tela, mas parar novos spawns
-        self.criar(Boss(LARGURA/2 - 64, -150))
+        quantidade = max(1, int(quantidade))
+        for i in range(quantidade):
+            offset = (i - (quantidade - 1) / 2.0) * 180
+            boss = Boss(LARGURA/2 - 64 + offset, -150)
+            boss.allow_dive = fase >= 3
+            boss.dive_cooldown = random.uniform(4.5, 7.5)
+            self.criar(boss)
 
     def atualizar(self, dt):
         # Tempo de respiro após eventos (acoplamento/falha)
@@ -84,14 +88,16 @@ class GerenciadorDeInimigos:
         else:
             self.tempo_total += dt
             self.tempo += dt
+        fase_boss = max(0, getattr(self, 'bosses_derrotados', 0))
         
         # Se boss ativo, não spawna inimigos comuns
         if not self.boss_ativo:
-            # dificuldade progressiva
-            intervalo = max(0.55, TEMPO_ENTRE_INIMIGOS - self.tempo_total * 0.006)
-            speed_mult = min(2.0, 1.0 + self.tempo_total * 0.02)
-            # multiplicador para cadência de tiro dos inimigos (1.0 -> 1.3)
-            self.shot_mult = min(1.3, 1.0 + self.tempo_total * 0.01)
+            # dificuldade progressiva (escala também com a fase)
+            fase_mult = 1.0 + 0.12 * max(0, self.fase - 1)
+            intervalo = max(0.45, (TEMPO_ENTRE_INIMIGOS - self.tempo_total * 0.006) / fase_mult)
+            speed_mult = min(2.5, (1.0 + self.tempo_total * 0.02) * fase_mult)
+            # multiplicador para cadência de tiro dos inimigos (1.0 -> 1.6)
+            self.shot_mult = min(1.6, 1.0 + self.tempo_total * 0.01 + fase_boss * 0.05 + 0.08 * (self.fase - 1))
             # spawn simples alternando tipos, mas com intervalo que diminui e velocidades que aumentam
             if self.tempo >= intervalo:
                 self.tempo = 0.0
@@ -124,15 +130,17 @@ class GerenciadorDeInimigos:
         # Verifica se o boss morreu para liberar spawns
         if self.boss_ativo:
             bosses = [i for i in self.inimigos if isinstance(i, Boss)]
+            mortos_novos = []
             for boss in bosses:
                 if boss.esta_morto() and not hasattr(boss, '_morte_notificada'):
-                    # Marca a morte do boss
                     boss._morte_notificada = True
-                    self.boss_killed = True
-                    self.boss_killed_pos = (boss.x + boss.largura/2, boss.y + boss.altura/2)
-            
+                    mortos_novos.append(boss)
             tem_boss = any(isinstance(i, Boss) and not i.esta_morto() for i in self.inimigos)
-            if not tem_boss:
+            if (not tem_boss) and (mortos_novos or self.boss_killed):
+                ultimo = mortos_novos[-1] if mortos_novos else bosses[-1] if bosses else None
+                if ultimo:
+                    self.boss_killed = True
+                    self.boss_killed_pos = (ultimo.x + ultimo.largura/2, ultimo.y + ultimo.altura/2)
                 self.boss_ativo = False
                 self.tempo_total += 200 # Aumenta dificuldade após boss
 
@@ -152,7 +160,7 @@ class GerenciadorDeInimigos:
         self.ufo_cd = random.uniform(16.0, 28.0)
         self.spawn_delay = max(0.0, atraso)
 
-    def verificar_colisoes_com_tiros(self, gerenciador_de_tiros, destrocos=None):
+    def verificar_colisoes_com_tiros(self, gerenciador_de_tiros, destrocos=None, upgrades=None):
         # Retorna quantos inimigos morreram neste passo
         abates = 0
         for inimigo in self.inimigos:
@@ -167,6 +175,8 @@ class GerenciadorDeInimigos:
                         inimigo.receber_dano(1)
                         if estava_vivo and inimigo.esta_morto():
                             abates += 1
+                            if upgrades is not None:
+                                upgrades.drop_random(inimigo.x + inimigo.largura/2, inimigo.y + inimigo.altura/2)
                             if destrocos is not None:
                                 cx = inimigo.x + inimigo.largura/2
                                 cy = inimigo.y + inimigo.altura/2
@@ -186,6 +196,8 @@ class GerenciadorDeInimigos:
                         inimigo.receber_dano(1)
                         if estava_vivo and inimigo.esta_morto():
                             abates += 1
+                            if upgrades is not None:
+                                upgrades.drop_random(inimigo.x + inimigo.largura/2, inimigo.y + inimigo.altura/2)
                             if isinstance(inimigo, DiscoVoador):
                                 self.ufo_killed = True
                                 self.ufo_killed_pos = (inimigo.x + inimigo.largura/2, inimigo.y + inimigo.altura/2)
@@ -198,9 +210,14 @@ class GerenciadorDeInimigos:
         return abates
 
     def verificar_colisao_com_jogador(self, jogador):
+        try:
+            hitboxes = jogador.get_segment_rects()
+        except Exception:
+            hitboxes = [jogador.retangulo]
         for inimigo in self.inimigos:
-            if inimigo.retangulo.colliderect(jogador.retangulo):
-                return inimigo
+            for hb in hitboxes:
+                if inimigo.retangulo.colliderect(hb):
+                    return inimigo
         return None
 
 class GerenciadorDeUpgrades:
@@ -208,6 +225,7 @@ class GerenciadorDeUpgrades:
         self.upgrades = []
         self.tempo = 0.0
         self.intervalo = 1.2
+        self.fase = 1
 
     def criar(self, upgrade):
         self.upgrades.append(upgrade)
@@ -217,7 +235,9 @@ class GerenciadorDeUpgrades:
         if self.tempo >= self.intervalo:
             self.tempo = 0.0
             # chance de spawn aleatória
-            if random.random() < 0.28:
+            chance_base = 0.28
+            chance = max(0.1, chance_base * (0.85 ** max(0, self.fase - 1)))
+            if random.random() < chance:
                 x = 20 + int(random.random() * (LARGURA - 40))
                 # 35% shield, 15% health, 50% v-shot
                 r = random.random()
@@ -232,18 +252,40 @@ class GerenciadorDeUpgrades:
             u.atualizar(dt)
         self.upgrades = [u for u in self.upgrades if not u.esta_morto()]
 
+    def drop_random(self, x, y):
+        # chance fixa por inimigo abatido
+        chance = 0.18
+        if random.random() > chance:
+            return
+        r = random.random()
+        if r < 0.35:
+            tipo = 'shield'
+        elif r < 0.50:
+            tipo = 'health'
+        elif r < 0.62:
+            tipo = 'laser'
+        else:
+            tipo = 'v'
+        self.criar(Upgrade(x, y, tipo=tipo, velocidade=90))
+
     def desenhar(self, tela):
         for u in self.upgrades:
             u.desenhar(tela)
 
     def verificar_coleta(self, jogador):
         efeitos = []
+        try:
+            hitboxes = jogador.get_segment_rects()
+        except Exception:
+            hitboxes = [jogador.retangulo]
         for u in self.upgrades:
             if u.esta_morto(): 
                 continue
-            if jogador.retangulo.colliderect(u.retangulo):
-                efeitos.append(u.tipo)
-                u.matar()
+            for hb in hitboxes:
+                if hb.colliderect(u.retangulo):
+                    efeitos.append(u.tipo)
+                    u.matar()
+                    break
         
         self.upgrades = [u for u in self.upgrades if not u.esta_morto()]
         return efeitos

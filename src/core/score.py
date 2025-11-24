@@ -36,9 +36,9 @@ class ScoreManager:
 
     def get_high_holder(self):
         if not self.top_scores:
-            return ("---", 0)
+            return ("---", 0, 0)
         top = self.top_scores[0]
-        return (top.get('name', '---'), top.get('score', 0))
+        return (top.get('name', '---'), top.get('score', 0), top.get('phase', 0))
 
     def get_top10(self):
         return self.top_scores
@@ -46,11 +46,11 @@ class ScoreManager:
     def qualifica(self, score: int):
         if len(self.top_scores) < 10:
             return True
-        return score > self.top_scores[-1].get('score', 0)
+        return score >= self.top_scores[-1].get('score', 0)
 
-    def registrar(self, nome: str, score: int):
+    def registrar(self, nome: str, score: int, fase: int = 0):
         nome = (nome or '').upper()[:3].ljust(3, '_')
-        self.top_scores.append({'name': nome, 'score': score})
+        self.top_scores.append({'name': nome, 'score': score, 'phase': int(fase)})
         self._ordenar()
         try:
             with open(self.arquivo, 'w') as f:
