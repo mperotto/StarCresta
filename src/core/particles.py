@@ -64,6 +64,28 @@ class GerenciadorDeParticulas:
             p.atualizar(dt)
         self.particulas = [p for p in self.particulas if p.viva]
 
+    def spawn_plasma_drag(self, obj):
+        # Gera partículas de plasma (arrasto atmosférico) ao redor do objeto
+        # Cores quentes e transparentes
+        if random.random() > 0.4: # Não gera todo frame para não saturar
+            return
+            
+        x = obj.x + random.uniform(0, obj.largura)
+        y = obj.y + random.uniform(obj.altura * 0.5, obj.altura) # Mais na parte de baixo/trás
+        
+        # Velocidade para cima (rastro)
+        vx = random.uniform(-20, 20) * SCALE
+        vy = -random.uniform(50, 100) * SCALE
+        
+        vida = 0.2 + random.random() * 0.2
+        raio = random.uniform(1, 3)
+        
+        # Laranja/Vermelho bem suave
+        cor = (255, random.randint(100, 180), 50)
+        
+        p = Particula(x, y, vx, vy, vida=vida, raio=raio, cor=cor)
+        self.criar(p)
+
     def desenhar(self, tela):
         for p in self.particulas:
             p.desenhar(tela)
@@ -86,11 +108,12 @@ class Estrela:
         pygame.draw.circle(tela, self.cor, (int(self.x), int(self.y)), self.raio)
 
 class Planeta:
-    def __init__(self, x, y, vel, escala, imagem, flyby=False, escala_final=None):
+    def __init__(self, x, y, vel, escala, imagem, flyby=False, escala_final=None, super_flyby=False):
         self.x = float(x)
         self.y = float(y)
         self.vel = float(vel) * SCALE
         self.flyby = flyby
+        self.super_flyby = super_flyby
         self.escala_inicial = escala
         self.escala_final = escala_final if escala_final is not None else escala
         self.imagem_base = imagem
@@ -102,7 +125,9 @@ class Planeta:
 
     def _atualizar_sprite(self):
         escala = self.escala_atual
-        max_w = int(min(LARGURA, ALTURA) * 1.2)
+        # Se for super flyby, permite crescer muito mais
+        limit = 4.0 if self.super_flyby else 1.2
+        max_w = int(min(LARGURA, ALTURA) * limit)
         w = max(32, min(max_w, int(self.imagem_base.get_width() * escala * SCALE)))
         h = max(32, min(max_w, int(self.imagem_base.get_height() * escala * SCALE)))
         self.sprite = pygame.transform.smoothscale(self.imagem_base, (w, h))
@@ -125,8 +150,9 @@ class Planeta:
         if self.y > ALTURA + self.raio:
             self.y = -self.raio
             self.x = random.uniform(0, LARGURA)
-            # reinicia escala
+            # reinicia escala e remove flag de super para não repetir
             self.escala_atual = self.escala_inicial
+            self.super_flyby = False
             self._atualizar_sprite()
 
     def desenhar(self, tela):
@@ -196,21 +222,51 @@ class CampoEstrelas:
                 pass
         return imgs
 
-    def _criar_planeta(self, force_flyby=False):
+    def iniciar_super_flyby(self):
+        # Força a criação de um planeta gigante que ocupará a tela
+        self._criar_planeta(force_flyby=True, super_size=True)
+
+    def tem_super_flyby(self):
+        # Verifica se há algum planeta em modo super flyby ativo na tela
+        for p in self.planetas:
+            if getattr(p, 'super_flyby', False):
+                # Considera ativo se estiver visível (y < ALTURA e y + raio > 0)
+                # Garante que o planeta já entrou na tela
+                if p.y - p.raio < ALTURA and p.y + p.raio > 0:
+                    return True
+        return False
+
+    def _criar_planeta(self, force_flyby=False, super_size=False):
         if not self.planeta_imgs:
             return
         img = random.choice(self.planeta_imgs)
         x = random.uniform(0, LARGURA)
-        y = random.uniform(0, ALTURA)
+        y = -random.uniform(100, 400) # Começa fora da tela acima
+        
         # alguns bem grandes (flyby) e únicos; demais variam por plano
         ja_tem_grande = any(p.raio > LARGURA * 0.25 for p in self.planetas)
         roll = random.random()
-        if (force_flyby or roll < 0.2) and not ja_tem_grande:
+        
+        flyby = False
+        super_flyby = False
+        escala_final = None
+        escala_inicial = 0.1
+
+        if (force_flyby or super_size or roll < 0.2) and (super_size or not ja_tem_grande):
             # flyby: planeta gigante ocupando boa parte da tela
-            # flyby ocupa praticamente a tela inteira
-            alvo = random.uniform(LARGURA * 1.0, LARGURA * 1.45)
-            vel = random.uniform(14, 26)
             flyby = True
+            if super_size:
+                super_flyby = True
+                # Super flyby: ocupa 2.5x a largura (zoom extremo)
+                alvo = LARGURA * 2.5
+                # Aumentado para durar menos tempo (aprox 30-40s)
+                vel = random.uniform(18, 25)
+                # Garante que o super flyby seja centralizado
+                x = LARGURA / 2
+            else:
+                alvo = random.uniform(LARGURA * 1.0, LARGURA * 1.45)
+                vel = random.uniform(14, 26)
+            
             escala_final = max(0.05, alvo / max(32, img.get_width()))
             escala_inicial = escala_final * 0.35
         elif roll < 0.45:
@@ -223,9 +279,10 @@ class CampoEstrelas:
             alvo = random.uniform(50, 110)
             vel = random.uniform(7, 16)
             flyby = False
+            
         # converte alvo de largura para escala relativa da textura original
-        escala = max(0.05, alvo / max(32, img.get_width()))
-        if flyby:
-            self.planetas.append(Planeta(x, y, vel, escala_inicial, img, flyby=True, escala_final=escala_final))
-        else:
+        if not flyby:
+            escala = max(0.05, alvo / max(32, img.get_width()))
             self.planetas.append(Planeta(x, y, vel, escala, img))
+        else:
+            self.planetas.append(Planeta(x, y, vel, escala_inicial, img, flyby=True, escala_final=escala_final, super_flyby=super_flyby))

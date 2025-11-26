@@ -107,6 +107,17 @@ class Boss(Inimigo):
             self.x += dir_x * self.dive_speed * 0.4 * dt
             self.y += self.dive_speed * dt
             target_angle = -self.max_angulo * dir_x
+            
+            # Continua atirando durante o mergulho!
+            # Força padrão de tiro rápido (1) ou spread (0)
+            if self.cd_ataque > 0.2: # Acelera tiros no mergulho
+                self.cd_ataque = 0.2
+            # Precisa passar o gerenciador de tiros e jogador, mas mover() não recebe isso.
+            # O ideal é chamar tentar_atirar no update do jogo ou passar args extras.
+            # Como mover() é chamado pelo update() do Boss, e tentar_atirar é chamado pelo jogo...
+            # Vamos apenas setar o estado para permitir que o jogo chame tentar_atirar.
+            # O jogo chama tentar_atirar se estado == 'atacando'. Vamos permitir no mergulho também.
+            
             if self.y >= self.dive_target_y:
                 self.estado = 'subindo'
                 self.tempo_estado = 0.0
@@ -129,7 +140,7 @@ class Boss(Inimigo):
                 self.angulo += change * (1 if diff > 0 else -1)
 
     def tentar_atirar(self, gerenciador_tiros, jogador, asteroides, dif_mult=1.0):
-        if self.estado != 'atacando':
+        if self.estado != 'atacando' and self.estado != 'mergulho':
             return
 
         self.cd_ataque -= 0.016 # Aproximação de dt, idealmente passaria dt aqui

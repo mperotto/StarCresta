@@ -258,12 +258,11 @@ class GerenciadorDeUpgrades:
         if random.random() > chance:
             return
         r = random.random()
-        if r < 0.35:
+        # Laser removido daqui (exclusivo do UFO)
+        if r < 0.40:
             tipo = 'shield'
-        elif r < 0.50:
+        elif r < 0.55:
             tipo = 'health'
-        elif r < 0.62:
-            tipo = 'laser'
         else:
             tipo = 'v'
         self.criar(Upgrade(x, y, tipo=tipo, velocidade=90))

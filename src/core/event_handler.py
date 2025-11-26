@@ -40,14 +40,19 @@ def processar_eventos(jogo):
                 if jogo.laser_wave_expire is not None:
                     return
                 if jogo.jogador.pode_atirar():
-                    if jogo.tempo_carregando >= 1.0:
-                        jogo.disparar_super()
-                    else:
-                        jogo.disparar_normal()
-                    # reinicia ciclo de carga imediatamente
-                    jogo.carregando_super = False
-                    jogo.tempo_carregando = 0.0
-                    jogo.sinalizou_super_pronto = False
+                    jogo.disparar_normal()
+
+            if evento.type == pygame.KEYUP and evento.key == pygame.K_SPACE:
+                if jogo.laser_wave_expire is not None:
+                    return
+                # Se soltou a barra de espaço e estava carregado, dispara o super
+                if jogo.tempo_carregando >= 1.0:
+                    jogo.disparar_super()
+                
+                # Reseta carga
+                jogo.carregando_super = False
+                jogo.tempo_carregando = 0.0
+                jogo.sinalizou_super_pronto = False
 
         elif jogo.estado == "pausado":
             if evento.type == pygame.KEYDOWN:
@@ -87,8 +92,6 @@ def processar_eventos(jogo):
                         if ch.isalpha() or ch.isdigit():
                             if len(jogo.initials_input) < 3:
                                 jogo.initials_input += ch
-                            if len(jogo.initials_input) >= 3:
-                                jogo._registrar_iniciais()
                 return
             else:
                 if evento.type == pygame.KEYDOWN:

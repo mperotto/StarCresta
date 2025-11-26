@@ -75,7 +75,7 @@ class Destroco(ObjetoDeJogo):
         self.rot_vel = random.uniform(-180, 180)
         self.cor = (150 + random.randint(-20, 20), 140 + random.randint(-20, 20), 130 + random.randint(-20, 20))
         # poder do fragmento: maior raio => mais dano
-        self.poder = 1 if self.raio < 10 else (2 if self.raio < 15 else 3)
+        self.poder = 1 if self.raio < 10 * SCALE else (2 if self.raio < 15 * SCALE else 3)
         # sprite opcional (meteoro), escalado ao diâmetro
         sprites = carregar_sprites_asteroide_opcoes(self.largura, self.altura)
         self.base_sprite = random.choice(sprites) if sprites else None

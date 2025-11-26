@@ -101,3 +101,96 @@ class TiroInimigo(ObjetoDeJogo):
 
     def desenhar(self, tela):
         pygame.draw.rect(tela, (255, 100, 120), self.retangulo)
+
+class TiroPlaneta(ObjetoDeJogo):
+    def __init__(self, x, y, player_x, player_y, ground_speed=0):
+        # Começa como 1 pixel
+        super().__init__(x, y, 1, 1)
+        
+        # Alvo e velocidades
+        self.ground_vy = ground_speed
+        
+        # Vetor base de perseguição
+        dx = player_x - x
+        dy = player_y - y
+        dist = math.hypot(dx, dy)
+        
+        # Velocidade inicial mais alta para permitir o "arco"
+        max_speed = 350 * SCALE
+        if dist > 0:
+            self.vx_base = (dx / dist) * max_speed
+            # Lança um pouco para cima (negativo Y) para criar o arco
+            self.vy_base = ((dy / dist) * max_speed) - (100 * SCALE)
+        else:
+            self.vx_base = 0
+            self.vy_base = max_speed
+            
+        self.target_r = S(6) # Tamanho final
+        self.current_r = 1.0
+        
+        # Controle de profundidade (Z)
+        self.z = 0.0 
+        # Zoom bem lento e progressivo
+        self.z_speed = 0.02 
+        self.z_accel = 0.15
+        
+        # Gravidade simulada na tela (faz o tiro cair/curvar)
+        self.gravity = 180 * SCALE
+        
+        self.dangerous = False
+        self.cor = (255, 60, 60)
+
+    def atualizar(self, dt):
+        # Atualiza profundidade
+        if self.z < 1.0:
+            self.z_speed += self.z_accel * dt
+            self.z += self.z_speed * dt
+            if self.z >= 1.0:
+                self.z = 1.0
+                self.dangerous = True
+        else:
+            self.dangerous = True
+            
+        # Tamanho baseado no Z
+        self.current_r = 1.0 + (self.target_r - 1.0) * self.z
+        
+        # Perspectiva
+        perspective_factor = 0.1 + 0.9 * (self.z ** 2)
+        
+        # Aplica gravidade na velocidade base Y (cria o arco)
+        self.vy_base += self.gravity * dt
+        
+        # Movimento
+        self.x += self.vx_base * perspective_factor * dt
+        self.y += (self.ground_vy + self.vy_base * perspective_factor) * dt
+        
+        # Atualiza hitbox
+        d = int(self.current_r * 2)
+        self.largura = d
+        self.altura = d
+        
+        if self.y > ALTURA + self.altura or self.x < -self.largura or self.x > LARGURA + self.largura or self.y < -self.altura:
+            self.matar()
+        self.sincronizar_retangulo()
+
+    def desenhar(self, tela):
+        # Alpha/Cor baseado na profundidade
+        if self.z < 0.2:
+            cor = (60, 10, 10)
+        elif not self.dangerous:
+            f = (self.z - 0.2) / 0.65
+            f = max(0.0, min(1.0, f))
+            r = int(60 + (255 - 60) * f)
+            g = int(10 + (60 - 10) * f)
+            b = int(10 + (60 - 10) * f)
+            cor = (r, g, b)
+        else:
+            cor = self.cor
+            
+        cx, cy = int(self.retangulo.centerx), int(self.retangulo.centery)
+        r = max(1, int(self.current_r))
+        
+        pygame.draw.circle(tela, cor, (cx, cy), r)
+        
+        if self.dangerous:
+            pygame.draw.circle(tela, (255, 200, 200), (cx, cy), max(1, int(r * 0.5)))
