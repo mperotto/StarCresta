@@ -3,6 +3,7 @@ import sys
 import math
 import os
 import random
+from datetime import datetime
 from src.settings import *
 from src.assets import carregar_som, get_resource_path
 from src.sprites.player import Jogador, TargetModule
@@ -239,10 +240,25 @@ class Jogo:
         self.new_score_registered = True
 
     def _desenhar_banner_fase(self):
-        if self.fase_banner_timer > 0.0:
+        if self.fase_banner_timer > 0.0 and not self.in_planet_stage:
             fase_txt = self.fonte_grande.render(f"Fase {self.fase}", True, (230, 235, 255))
             box = fase_txt.get_rect(center=(LARGURA//2, ALTURA//2))
             self.tela.blit(fase_txt, box)
+
+    def salvar_screenshot(self):
+        """Captura a tela atual e salva em capturas/capture_YYYYMMDD_HHMMSS_mmm.png."""
+        try:
+            os.makedirs("capturas", exist_ok=True)
+            surf = pygame.display.get_surface() or self.tela
+            if surf is None:
+                return
+            snap = surf.copy()
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            path = os.path.join("capturas", f"capture_{ts}.png")
+            pygame.image.save(snap, path)
+        except Exception:
+            # evita crash se não puder salvar
+            pass
 
 # ... (inside atualizar)
 
@@ -343,111 +359,94 @@ class Jogo:
             result = self.planet_stage.update(dt, self.jogador, self.invul_timer)
             self.jogador.atualizar(dt)
             
-            # Efeito de Reentrada (Bola de Fogo)
-            if self.planet_stage.state == 'entering':
-                # Gera MUITAS partículas de plasma para simular a bola de fogo
-                for _ in range(5):
-                    self.particulas.spawn_plasma_drag(self.jogador)
-            
             # Colisão com parede
             if result is True:
                 # Dano ao bater na parede
-                if self.jogador.invul_timer <= 0:
+                if self.invul_timer <= 0:
                     self.jogador.receber_dano()
                     self.vidas -= 1
                     self.invul_timer = 2.0
                     # Empurra jogador para o centro para não ficar preso na parede
                     self.jogador.x = LARGURA / 2 - self.jogador.largura / 2
                 
+            # Falha de reentrada (sem escudo)
+            if result == 'failed':
+                self.vidas -= 1
+                cx = self.jogador.x + self.jogador.largura/2
+                cy = self.jogador.y + self.jogador.altura/2
+                self.particulas.spawn_ao_redor(cx, cy, intensidade=50, raio=40, 
+                                               cores=[(255, 50, 0), (255, 150, 0)], 
+                                               vel_base=100, vel_var=200)
+                if hasattr(self, 'sfx_explosion_big') and self.sfx_explosion_big:
+                    try: self.sfx_explosion_big.play()
+                    except: pass
+                self.jogador.matar()
+                txt = self.fonte_grande.render("REENTRY FAILURE!", True, (255, 80, 60))
+                self.fx_texts.append({'surf': txt, 'pos': (LARGURA//2 - txt.get_width()//2, ALTURA//2), 't': 0.0, 'dur': 2.0, 'vy': -20})
+                self.in_planet_stage = False
+                self.estado = 'jogando'
+                return
             # Fim da fase
             if result == 'finished':
                 self.in_planet_stage = False
                 self.estado = 'jogando'
                 # Retorna ao espaço
-                
+
+            # Banner de fase continua sumindo mesmo na fase planeta
+            if self.fase_banner_timer > 0.0:
+                self.fase_banner_timer = max(0.0, self.fase_banner_timer - dt)
+
             return # Pula update do espaço normal
 
         self.fundo.atualizar(dt)
         
-        # Lógica do Evento Super Flyby (Planeta Gigante)
+        # Lógica do Evento Super Flyby do Planeta
         if self.fundo.tem_super_flyby():
             # Mostra mensagem se não estiver em boss/docking
             if not self.inimigos.boss_ativo and self.estado == 'jogando':
                 # Input para entrar no planeta (ENTER)
                 keys = pygame.key.get_pressed()
                 if keys[pygame.K_RETURN]: 
-                    # Verifica se tem escudo
-                    if self.player_shield_timer > 0:
-                        self.in_planet_stage = True
-                        
-                        # Encontra a imagem do planeta gigante
-                        planet_img = None
-                        for p in self.fundo.planetas:
-                            if getattr(p, 'super_flyby', False):
+                    # Permite entrada apenas em super flyby; sem escudo explode mais tarde
+                    self.in_planet_stage = True
+                    # Seleciona imagem do maior planeta super flyby visível
+                    planet_img = None
+                    best_r = -1
+                    for p in self.fundo.planetas:
+                        if getattr(p, 'super_flyby', False) and (p.y - p.raio < ALTURA and p.y + p.raio > 0):
+                            if p.raio > best_r:
+                                best_r = p.raio
                                 planet_img = p.imagem_base
-                                break
-                        
-                        self.planet_stage.start(planet_img)
-                        # Limpa inimigos do espaço para evitar conflitos
-                        self.inimigos.inimigos.clear()
-                        self.tiros_inimigos.tiros.clear()
-                        self.tiros.tiros.clear() # Limpa tiros do player também
-                        self.destrocos.destrocos.clear()
-                        return
-                    else:
-                        # Sem escudo: Explode na reentrada!
-                        self.vidas -= 1
-                        cx = self.jogador.x + self.jogador.largura/2
-                        cy = self.jogador.y + self.jogador.altura/2
-                        self.particulas.spawn_ao_redor(cx, cy, intensidade=50, raio=40, 
-                                                       cores=[(255, 50, 0), (255, 150, 0)], 
-                                                       vel_base=100, vel_var=200)
-                        if hasattr(self, 'sfx_explosion_big') and self.sfx_explosion_big:
-                            try: self.sfx_explosion_big.play()
-                            except: pass
-                        self.jogador.matar() # Reseta posição/estado
-                        # Feedback visual de erro
-                        txt = self.fonte_grande.render("SHIELD REQUIRED!", True, (255, 0, 0))
-                        self.fx_texts.append({'surf': txt, 'pos': (LARGURA//2 - txt.get_width()//2, ALTURA//2), 't': 0.0, 'dur': 2.0, 'vy': -20})
+                    self.planet_stage.start(planet_img, no_shield=(self.player_shield_timer <= 0))
+                    # Limpa inimigos do espaço para evitar conflitos
+                    self.inimigos.inimigos.clear()
+                    self.tiros_inimigos.tiros.clear()
+                    self.tiros.tiros.clear() # Limpa tiros do player também
+                    self.destrocos.destrocos.clear()
+                    return
                 
                 # Renderiza texto de aviso (piscando)
                 if int(pygame.time.get_ticks() / 400) % 2 == 0:
-                    if self.player_shield_timer > 0:
-                        color = (0, 255, 0)
-                        msg = "PRESS ENTER TO DESCEND"
-                    else:
-                        color = (255, 50, 50)
-                        msg = "SHIELD REQUIRED TO DESCEND"
+                    color = (0, 255, 0) if self.player_shield_timer > 0 else (255, 180, 60)
+                    msg = "PRESS ENTER TO DESCEND" if self.player_shield_timer > 0 else "ENTER TO DESCEND (HOT!)"
                     
                     txt = self.fonte.render(msg, True, color)
                     # Centralizado na parte inferior
                     self.tela.blit(txt, (LARGURA//2 - txt.get_width()//2, ALTURA - 120))
 
-            # Aplica efeito visual de plasma (arrasto) nas naves
-            self.particulas.spawn_plasma_drag(self.jogador)
-            for inimigo in self.inimigos.inimigos:
-                self.particulas.spawn_plasma_drag(inimigo)
+            pass
 
-            # Planeta ocupando a tela: dispara projéteis "da terra"
-            self.planet_shot_timer -= dt
-            if self.planet_shot_timer <= 0:
-                self.planet_shot_timer = random.uniform(0.35, 0.7)
-                
-                # Dispara de um ÚNICO ponto central no planeta (base no solo)
-                # Como o planeta ocupa a tela toda, vamos fixar o ponto de origem visualmente
-                # no centro da tela (simulando que estamos sobrevoando a base)
-                sx = LARGURA // 2
-                sy = ALTURA // 2
-                
-                # Velocidade do solo (estimada da velocidade do planeta super flyby)
-                ground_speed = 20.0 * SCALE
-                
-                # Alvo: jogador
-                px = self.jogador.x + self.jogador.largura/2
-                py = self.jogador.y + self.jogador.altura/2
-                
-                # Cria o tiro que vem "de baixo" (Z-axis)
-                self.tiros_inimigos.criar(TiroPlaneta(sx, sy, px, py, ground_speed=ground_speed))
+            # Disparos do planeta só em super flyby
+            if self.fundo.tem_super_flyby():
+                self.planet_shot_timer -= dt
+                if self.planet_shot_timer <= 0:
+                    self.planet_shot_timer = random.uniform(0.35, 0.7)
+                    sx = LARGURA // 2
+                    sy = ALTURA // 2
+                    ground_speed = 20.0 * SCALE
+                    px = self.jogador.x + self.jogador.largura/2
+                    py = self.jogador.y + self.jogador.altura/2
+                    self.tiros_inimigos.criar(TiroPlaneta(sx, sy, px, py, ground_speed=ground_speed))
         else:
             # Tenta iniciar evento aleatoriamente
             self.planet_flyby_timer -= dt
@@ -1009,8 +1008,7 @@ class Jogo:
         
         if self.in_planet_stage:
             self.planet_stage.draw(self.tela)
-            self.jogador.desenhar(self.tela)
-            # HUD simplificado ou completo? Vamos manter o HUD normal depois
+            # self.planet_stage.draw_cockpit(self.tela) # MOVED to end
         else:
             self.fundo.desenhar(self.tela)
         
@@ -1060,35 +1058,41 @@ class Jogo:
             pygame.display.flip()
             return
 
-        self.upgrades.desenhar(self.tela)
-        self.destrocos.desenhar(self.tela)
-        
-        # nave com fade no Game Over
-        if self.estado == 'game_over' and getattr(self, 'game_over_fx_active', False) and getattr(self.jogador, 'sprite', None):
-            try:
-                dur = 1.2
-                t = max(0.0, min(1.0, self.game_over_fx_t / dur))
-                alpha = int(255 * (1.0 - t))
-                if alpha > 0:
-                    spr = self.jogador.sprite.copy()
-                    spr.set_alpha(alpha)
-                    self.tela.blit(spr, self.jogador.retangulo.topleft)
-            except Exception:
+        if not self.in_planet_stage:
+            self.upgrades.desenhar(self.tela)
+            self.destrocos.desenhar(self.tela)
+            
+            # nave com fade no Game Over
+            if self.estado == 'game_over' and getattr(self, 'game_over_fx_active', False) and getattr(self.jogador, 'sprite', None):
+                try:
+                    dur = 1.2
+                    t = max(0.0, min(1.0, self.game_over_fx_t / dur))
+                    alpha = int(255 * (1.0 - t))
+                    if alpha > 0:
+                        spr = self.jogador.sprite.copy()
+                        spr.set_alpha(alpha)
+                        self.tela.blit(spr, self.jogador.retangulo.topleft)
+                except Exception:
+                    self.jogador.desenhar(self.tela)
+            else:
                 self.jogador.desenhar(self.tela)
-        else:
-            self.jogador.desenhar(self.tela)
             
         self.particulas.desenhar(self.tela)
-        # anel pulsante quando super está totalmente carregado
-        if self.estado == 'jogando' and self.carregando_super and self.tempo_carregando >= 1.5:
-            cx = int(self.jogador.x + self.jogador.largura/2)
-            cy = int(self.jogador.y + self.jogador.altura/2)
-            base = 28
-            osc = 4 * math.sin(self.tempo_carregando * 8.0)
-            pygame.draw.circle(self.tela, (150, 255, 255), (cx, cy), int(base + osc), 2)
-        self.tiros.desenhar(self.tela)
-        self.tiros_inimigos.desenhar(self.tela)
-        self.inimigos.desenhar(self.tela)
+        
+        if self.in_planet_stage:
+            self.planet_stage.draw_cockpit(self.tela)
+
+        if not self.in_planet_stage:
+            # anel pulsante quando super está totalmente carregado
+            if self.estado == 'jogando' and self.carregando_super and self.tempo_carregando >= 1.5:
+                cx = int(self.jogador.x + self.jogador.largura/2)
+                cy = int(self.jogador.y + self.jogador.altura/2)
+                base = 28
+                osc = 4 * math.sin(self.tempo_carregando * 8.0)
+                pygame.draw.circle(self.tela, (150, 255, 255), (cx, cy), int(base + osc), 2)
+            self.tiros.desenhar(self.tela)
+            self.tiros_inimigos.desenhar(self.tela)
+            self.inimigos.desenhar(self.tela)
         
         # desenhar textos flutuantes (ex.: +1 VIDA)
         for fx in self.fx_texts:
@@ -1123,12 +1127,12 @@ class Jogo:
         rec_phase_txt = f" F{rec_phase}" if rec_phase else ""
         rec_txt = self.fonte.render(f"REC: {rec_name} {rec_score}{rec_phase_txt}", True, (200, 210, 255))
         self.tela.blit(rec_txt, (LARGURA - rec_txt.get_width() - 10, 10))
-        # piscar o jogador quando invulnerável
-        if self.invul_timer > 0 and self.estado == 'jogando':
+        # piscar o jogador quando invulnerável (apenas fora do planeta)
+        if self.invul_timer > 0 and self.estado == 'jogando' and not self.in_planet_stage:
             if int(pygame.time.get_ticks() / 100) % 2 == 0:
                 pygame.draw.rect(self.tela, (255, 255, 255), self.jogador.retangulo, 2)
-        # desenha campo de força do jogador
-        if self.player_shield_timer > 0:
+        # desenha campo de força do jogador (apenas fora do mini‑game)
+        if self.player_shield_timer > 0 and not self.in_planet_stage:
             cx = int(self.jogador.x + self.jogador.largura/2)
             cy = int(self.jogador.y + self.jogador.altura/2)
             r = max(self.jogador.largura, self.jogador.altura)
@@ -1256,6 +1260,13 @@ class Jogo:
             offsets = [-8, +8]
         else:
             offsets = [0]
+
+        # Apenas no planet_stage: registra rastro 3D sem mexer no 2D
+        if self.in_planet_stage:
+            try:
+                self.planet_stage.registrar_tiro_cockpit(offsets, angulos)
+            except Exception:
+                pass
 
         for off in offsets:
             for ang in angulos:

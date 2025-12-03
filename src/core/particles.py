@@ -140,7 +140,10 @@ class Planeta:
             perc = max(0.0, min(1.0, (self.y + self.raio) / (ALTURA + self.raio)))
             alvo = self.escala_inicial + (self.escala_final - self.escala_inicial) * perc
             # suaviza zoom com interpolação exponencial
-            lerp = 1 - math.exp(-dt * 1.8)
+            base = 1.8
+            if self.super_flyby:
+                base = 1.1
+            lerp = 1 - math.exp(-dt * base)
             self.escala_atual = self.escala_atual + (alvo - self.escala_atual) * lerp
             if self.rescale_cd <= 0.0 and abs(alvo - self.escala_atual) > 0.005:
                 self._atualizar_sprite()
@@ -183,16 +186,18 @@ class CampoEstrelas:
             cor = (brilho, brilho, 200 + int(40 * camada))
             self.estrelas.append(Estrela(x, y, vel, raio, cor))
         if self.max_planetas > 0:
-            # garante um flyby e poucos planetas simultâneos
+            # cria 1 planeta próximo (flyby) e 1 distante, no máximo
             self._criar_planeta(force_flyby=True)
             for _ in range(self.max_planetas - 1):
                 self._criar_planeta()
+            self._enforce_planet_constraints()
 
     def atualizar(self, dt):
         for e in self.estrelas:
             e.atualizar(dt)
         for p in self.planetas:
             p.atualizar(dt)
+        self._enforce_planet_constraints()
 
     def desenhar(self, tela):
         for e in self.estrelas:
@@ -223,8 +228,25 @@ class CampoEstrelas:
         return imgs
 
     def iniciar_super_flyby(self):
-        # Força a criação de um planeta gigante que ocupará a tela
-        self._criar_planeta(force_flyby=True, super_size=True)
+        # Promove um planeta em flyby já visível para super flyby com zoom gradual
+        candidato = None
+        best = -1
+        for p in self.planetas:
+            if getattr(p, 'flyby', False) and (p.y - p.raio < ALTURA and p.y + p.raio > 0):
+                if p.raio > best:
+                    best = p.raio
+                    candidato = p
+        if candidato is not None:
+            candidato.super_flyby = True
+            alvo = LARGURA * 2.2
+            candidato.escala_final = max(0.05, alvo / max(32, candidato.imagem_base.get_width()))
+            # centraliza lentamente
+            candidato.x = LARGURA / 2
+            # reduz velocidade para zoom mais demorado
+            candidato.vel = max(10.0, candidato.vel * 0.7)
+        else:
+            # fallback: cria um flyby normal (não super) para ser promovido futuramente
+            self._criar_planeta(force_flyby=True)
 
     def tem_super_flyby(self):
         # Verifica se há algum planeta em modo super flyby ativo na tela
@@ -236,6 +258,28 @@ class CampoEstrelas:
                     return True
         return False
 
+    def tem_flyby_ativo(self):
+        for p in self.planetas:
+            if getattr(p, 'flyby', False) or getattr(p, 'super_flyby', False):
+                if p.y - p.raio < ALTURA and p.y + p.raio > 0:
+                    return True
+        return False
+
+    def _enforce_planet_constraints(self):
+        # mantém no máximo 1 planeta próximo (flyby/super) e 1 distante
+        flybys = [p for p in self.planetas if getattr(p, 'flyby', False) or getattr(p, 'super_flyby', False)]
+        comuns = [p for p in self.planetas if not (getattr(p, 'flyby', False) or getattr(p, 'super_flyby', False))]
+        # mantém o flyby mais próximo (maior raio)
+        if len(flybys) > 1:
+            flybys.sort(key=lambda p: p.raio, reverse=True)
+            keep = set(flybys[:1])
+            self.planetas = [p for p in self.planetas if (p in keep) or (p in comuns)]
+        # mantém apenas 1 distante (menor escala)
+        if len(comuns) > 1:
+            comuns.sort(key=lambda p: p.escala_atual)
+            keep_common = set(comuns[:1])
+            self.planetas = [p for p in self.planetas if (p in keep_common) or (p in flybys)]
+
     def _criar_planeta(self, force_flyby=False, super_size=False):
         if not self.planeta_imgs:
             return
@@ -244,7 +288,7 @@ class CampoEstrelas:
         y = -random.uniform(100, 400) # Começa fora da tela acima
         
         # alguns bem grandes (flyby) e únicos; demais variam por plano
-        ja_tem_grande = any(p.raio > LARGURA * 0.25 for p in self.planetas)
+        ja_tem_grande = any(getattr(p, 'flyby', False) or getattr(p, 'super_flyby', False) for p in self.planetas)
         roll = random.random()
         
         flyby = False
@@ -260,24 +304,24 @@ class CampoEstrelas:
                 # Super flyby: ocupa 2.5x a largura (zoom extremo)
                 alvo = LARGURA * 2.5
                 # Aumentado para durar menos tempo (aprox 30-40s)
-                vel = random.uniform(18, 25)
+                vel = random.uniform(12, 18)
                 # Garante que o super flyby seja centralizado
                 x = LARGURA / 2
             else:
                 alvo = random.uniform(LARGURA * 1.0, LARGURA * 1.45)
-                vel = random.uniform(14, 26)
+                vel = random.uniform(14, 22)
             
             escala_final = max(0.05, alvo / max(32, img.get_width()))
             escala_inicial = escala_final * 0.35
         elif roll < 0.45:
             # plano médio
             alvo = random.uniform(120, 220)
-            vel = random.uniform(12, 22)
+            vel = random.uniform(10, 18)
             flyby = False
         else:
             # distante
             alvo = random.uniform(50, 110)
-            vel = random.uniform(7, 16)
+            vel = random.uniform(6, 12)
             flyby = False
             
         # converte alvo de largura para escala relativa da textura original

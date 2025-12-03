@@ -8,6 +8,11 @@ def processar_eventos(jogo):
         if evento.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+        if evento.type == pygame.KEYDOWN and evento.key == pygame.K_s:
+            try:
+                jogo.salvar_screenshot()
+            except Exception:
+                pass
 
         if jogo.estado == "menu":
             acao = jogo.menu.lidar_evento(evento)
@@ -41,6 +46,17 @@ def processar_eventos(jogo):
                     return
                 if jogo.jogador.pode_atirar():
                     jogo.disparar_normal()
+            # atalho: entrar direto no mini‑game 3D
+            if evento.type == pygame.KEYDOWN and evento.key == pygame.K_p:
+                if not jogo.in_planet_stage:
+                    jogo.player_shield_timer = 10.0
+                    jogo.in_planet_stage = True
+                    jogo.planet_stage.start(None, no_shield=False)
+                    jogo.inimigos.inimigos.clear()
+                    jogo.tiros_inimigos.tiros.clear()
+                    jogo.tiros.tiros.clear()
+                    jogo.destrocos.destrocos.clear()
+                    return
 
             if evento.type == pygame.KEYUP and evento.key == pygame.K_SPACE:
                 if jogo.laser_wave_expire is not None:
