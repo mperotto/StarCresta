@@ -86,8 +86,10 @@ class Jogador(ObjetoDeJogo):
 
     def atualizar(self, dt):
         if self.spawn_anim > 0.0:
-            alvo_y = ALTURA - 80
-            self.y = max(alvo_y, self.y - 140 * dt)
+            alvo_y = ALTURA - S(80)
+            # Sobe a nave até o alvo (y diminui para subir na tela)
+            if self.y > alvo_y:
+                self.y = max(alvo_y, self.y - S(140) * dt)
             self.spawn_anim = max(0.0, self.spawn_anim - dt)
         else:
             teclas = pygame.key.get_pressed()

@@ -6,6 +6,7 @@ class Menu:
         self.jogo = jogo
         self.fonte_titulo = pygame.font.SysFont(None, 80)
         self.fonte_opcao = pygame.font.SysFont(None, 40)
+        self.fonte_pequena = pygame.font.SysFont(None, 26)
         self.opcoes = ['Jogar', 'Sair']
         self.selecionado = 0
 
@@ -18,14 +19,14 @@ class Menu:
 
         # Título
         titulo = self.fonte_titulo.render("STAR CRESTA", True, (100, 200, 255))
-        rect_titulo = titulo.get_rect(center=(LARGURA//2, ALTURA//3))
+        rect_titulo = titulo.get_rect(center=(LARGURA//2, ALTURA//4)) # Ajustado para dar mais espaço
         tela.blit(titulo, rect_titulo)
 
         # Opções
         for i, opcao in enumerate(self.opcoes):
             cor = (255, 255, 255) if i == self.selecionado else (150, 150, 150)
             texto = self.fonte_opcao.render(opcao, True, cor)
-            rect = texto.get_rect(center=(LARGURA//2, ALTURA//2 + i * 60))
+            rect = texto.get_rect(center=(LARGURA//2, ALTURA//2 - 30 + i * 60))
             tela.blit(texto, rect)
             
             # Seta de seleção
@@ -35,6 +36,21 @@ class Menu:
                     (rect.left - 20, rect.centery + 10),
                     (rect.left - 5, rect.centery)
                 ])
+        
+        # Recordes
+        top_scores = self.jogo.score_manager.get_top10()
+        titulo_recordes = self.fonte_opcao.render("RECORDES", True, (255, 215, 0))
+        rect_titulo_recordes = titulo_recordes.get_rect(center=(LARGURA//2, ALTURA//2 + 100))
+        tela.blit(titulo_recordes, rect_titulo_recordes)
+
+        for idx, entry in enumerate(top_scores[:5]): # Mostrar top 5 no menu
+            nome = entry.get('name', '---')
+            pts = entry.get('score', 0)
+            fase = entry.get('phase', 0)
+            fase_txt = f" F{fase}" if fase else ""
+            linha = self.fonte_pequena.render(f"{idx+1:02d}. {nome} - {pts}{fase_txt}", True, (220, 230, 255))
+            rect_linha = linha.get_rect(center=(LARGURA//2, ALTURA//2 + 150 + idx * 28))
+            tela.blit(linha, rect_linha)
 
     def lidar_evento(self, evento):
         if evento.type == pygame.KEYDOWN:

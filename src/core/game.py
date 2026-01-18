@@ -66,7 +66,7 @@ class Jogo:
         self.planet_stage = PlanetStage()
         self.in_planet_stage = False
 
-        self.jogador = Jogador(LARGURA/2 - 18, ALTURA - 80)
+        self.jogador = Jogador(LARGURA/2 - S(18), ALTURA - S(80))
         self.tiros = GerenciadorDeTiros()
         self.inimigos = GerenciadorDeInimigos()
         self.inimigos.spawn_delay = 1.0
@@ -95,6 +95,28 @@ class Jogo:
         
         self.upgrades = GerenciadorDeUpgrades()
         self.destrocos = GerenciadorDeDestrocos()
+        self.debug_viewer_active = False
+        self.debug_yaw = 0.0
+        self.debug_pitch = 0.5 # Começa olhando de cima
+        self.debug_dist = 120.0 # Afasta o zoom inicial para ver o modelo todo
+        self.debug_tex_scale = 0.003
+        self.debug_tex_enabled = True
+        self.debug_tex_mode = 2  # 0=UV, 1=Triplanar, 2=Planar Top-Down (Default for Terrain)
+        self.debug_render_mode = 0  # 0=Normal (Default), 1=Fullbright, 2=Normals
+        self.debug_wireframe = False
+        self.debug_model_rot = [1.64, -0.12, -7.57] # Rotação ajustada manualmente pelo usuário
+        self.debug_target = [0.0, 0.0, 0.0] # Alvo da câmera para Pan
+        self.debug_gizmo_active = True
+        self.debug_axes_created = False
+        
+        self.image_viewer_active = False
+        self.image_viewer_img = None
+        self.image_zoom = 1.0
+        self.image_offset_x = 0
+        self.image_offset_y = 0
+        self.image_dragging = False
+        self.image_last_mouse = None
+        self.image_path = r"C:\Users\usuario\examplegamepoo\assets\models\textures\GOOGLE_SAT_WM.tif"
         
         # carregar sons/música
         self._carregar_audio()
@@ -127,6 +149,12 @@ class Jogo:
         self.laser_timer = None
         self.laser_beam_timer = 0.0
         self.laser_beam_active = False
+        
+        # INÍCIO RÁPIDO: Pula direto para a fase do canyon (DESATIVADO)
+        # self.in_planet_stage = True
+        # self.planet_stage.start(None, no_shield=False)
+        # self.planet_stage.state = 'playing'
+        # self.planet_stage.use_3d = True
         
         # Evento de Flyby Planetário
         self.planet_flyby_timer = random.uniform(20.0, 40.0)
@@ -182,7 +210,7 @@ class Jogo:
     def reiniciar(self):
         self.pontuacao = 0
         self.vidas = VIDAS_INICIAIS
-        self.jogador = Jogador(LARGURA/2 - 18, ALTURA - 80)
+        self.jogador = Jogador(LARGURA/2 - S(18), ALTURA - S(80))
         self.tiros = GerenciadorDeTiros()
         self.inimigos = GerenciadorDeInimigos()
         self.inimigos.spawn_delay = 1.0
@@ -353,6 +381,24 @@ class Jogo:
         processar_eventos(self)
 
     def atualizar(self, dt):
+        if self.image_viewer_active:
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_LEFT]:
+                self.image_offset_x -= int(300 * dt)
+            if keys[pygame.K_RIGHT]:
+                self.image_offset_x += int(300 * dt)
+            if keys[pygame.K_UP]:
+                self.image_offset_y -= int(300 * dt)
+            if keys[pygame.K_DOWN]:
+                self.image_offset_y += int(300 * dt)
+            if keys[pygame.K_1]:
+                self.image_zoom = max(0.05, self.image_zoom * 0.9)
+            if keys[pygame.K_2]:
+                self.image_zoom = min(20.0, self.image_zoom * 1.1)
+            return
+        if self.debug_viewer_active:
+            self._update_debug_viewer(dt)
+            return
         # atualiza fundo e partículas mesmo em game over
         # Se estiver na fase do planeta, atualiza ela e ignora o resto do espaço
         if self.in_planet_stage:
@@ -673,7 +719,7 @@ class Jogo:
                 else:
                     self.invul_timer = 1.8
                     # anima respawn: traz a nave de baixo pra posição padrão
-                    self.jogador.y = ALTURA + 30
+                    self.jogador.y = ALTURA + S(30)
                     try:
                         self.jogador.spawn_anim = 1.2
                     except Exception:
@@ -976,7 +1022,7 @@ class Jogo:
                                 except Exception: pass
                             self.invul_timer = max(self.invul_timer, 1.8)
                             # traz nave de baixo e anima subida
-                            self.jogador.y = ALTURA + 30
+                            self.jogador.y = ALTURA + S(30)
                             try:
                                 self.jogador.spawn_anim = 1.2
                             except Exception:
@@ -1005,6 +1051,46 @@ class Jogo:
 
     def desenhar(self):
         self.tela.fill((5, 8, 15))
+        if self.image_viewer_active:
+            if self.image_viewer_img is None:
+                try:
+                    if os.path.exists(self.image_path):
+                        self.image_viewer_img = pygame.image.load(self.image_path).convert_alpha()
+                        iw, ih = self.image_viewer_img.get_size()
+                        sx = LARGURA / float(iw)
+                        sy = ALTURA / float(ih)
+                        self.image_zoom = min(sx, sy)
+                        self.image_offset_x = (LARGURA - int(iw * self.image_zoom)) // 2
+                        self.image_offset_y = (ALTURA - int(ih * self.image_zoom)) // 2
+                    else:
+                        self.image_viewer_img = pygame.Surface((LARGURA, ALTURA))
+                        self.image_viewer_img.fill((20, 20, 26))
+                except Exception:
+                    self.image_viewer_img = pygame.Surface((LARGURA, ALTURA))
+                    self.image_viewer_img.fill((20, 20, 26))
+            if self.image_viewer_img:
+                iw, ih = self.image_viewer_img.get_size()
+                sw = max(1, int(iw * self.image_zoom))
+                sh = max(1, int(ih * self.image_zoom))
+                scaled = pygame.transform.smoothscale(self.image_viewer_img, (sw, sh))
+                self.tela.fill((6, 6, 9))
+                self.tela.blit(scaled, (self.image_offset_x, self.image_offset_y))
+                hud = self.fonte.render(f"Viewer Img | I sai | ←→↑↓ pan | 1/2 zoom={self.image_zoom:.3f} | mouse arrasta/roda | R reset | F9 screenshot", True, (220, 230, 255))
+                self.tela.blit(hud, (10, 10))
+            if self.usar_escala:
+                pygame.transform.scale(self.tela, self.tela_real.get_size(), self.tela_real)
+            else:
+                self.tela_real.blit(self.tela, (0, 0))
+            pygame.display.flip()
+            return
+        if self.debug_viewer_active:
+            self._draw_debug_viewer(self.tela)
+            if self.usar_escala:
+                pygame.transform.scale(self.tela, self.tela_real.get_size(), self.tela_real)
+            else:
+                self.tela_real.blit(self.tela, (0, 0))
+            pygame.display.flip()
+            return
         
         if self.in_planet_stage:
             self.planet_stage.draw(self.tela)
@@ -1016,7 +1102,7 @@ class Jogo:
             self.menu.desenhar(self.tela)
             # Desenha a surface lógica na tela real (com escala se necessário)
             if self.usar_escala:
-                pygame.transform.scale(self.tela, (self.largura_tela, self.altura_tela), self.tela_real)
+                pygame.transform.scale(self.tela, self.tela_real.get_size(), self.tela_real)
             else:
                 self.tela_real.blit(self.tela, (0, 0))
             pygame.display.flip()
@@ -1032,7 +1118,7 @@ class Jogo:
             
             # Desenha a surface lógica na tela real (com escala se necessário)
             if self.usar_escala:
-                pygame.transform.scale(self.tela, (self.largura_tela, self.altura_tela), self.tela_real)
+                pygame.transform.scale(self.tela, self.tela_real.get_size(), self.tela_real)
             else:
                 self.tela_real.blit(self.tela, (0, 0))
             pygame.display.flip()
@@ -1052,7 +1138,7 @@ class Jogo:
             
             # Desenha a surface lógica na tela real (com escala se necessário)
             if self.usar_escala:
-                pygame.transform.scale(self.tela, (self.largura_tela, self.altura_tela), self.tela_real)
+                pygame.transform.scale(self.tela, self.tela_real.get_size(), self.tela_real)
             else:
                 self.tela_real.blit(self.tela, (0, 0))
             pygame.display.flip()
@@ -1176,7 +1262,7 @@ class Jogo:
             self.tela.blit(t3, (LARGURA//2 - t3.get_width()//2, ALTURA//2 + 30))
         # Desenha a surface lógica na tela real (com escala se necessário)
         if self.usar_escala:
-            pygame.transform.scale(self.tela, (self.largura_tela, self.altura_tela), self.tela_real)
+            pygame.transform.scale(self.tela, self.tela_real.get_size(), self.tela_real)
         else:
             self.tela_real.blit(self.tela, (0, 0))
             
@@ -1188,6 +1274,245 @@ class Jogo:
             self.lidar_com_eventos()
             self.atualizar(dt)
             self.desenhar()
+
+    def toggle_debug_viewer(self):
+        self.debug_viewer_active = not self.debug_viewer_active
+        try:
+            r = self.planet_stage.renderer3d
+            if r:
+                r.set_fog(0.1, (0.6, 0.65, 0.7))
+                r.program['tex_mode'].value = self.debug_tex_mode
+                # Auto-ajuste de escala para Planar (1 / tamanho do terreno)
+                if self.debug_tex_mode == 2:
+                    try:
+                         # Tenta pegar bounds do canyon
+                         if 'canyon' in r.models:
+                             m = r.models['canyon']
+                             size = m['bounds_size']
+                             # Maior dimensão X ou Z
+                             max_dim = max(size.x, size.z)
+                             if max_dim > 0.1:
+                                 # Define escala para cobrir o terreno inteiro (1.0 / max_dim)
+                                 # Pode precisar de ajuste fino se a textura for quadrada e o terreno retangular
+                                 self.debug_tex_scale = 1.0 / max_dim
+                                 r.set_model_tex_scale('canyon', self.debug_tex_scale)
+                    except Exception:
+                        pass
+                else:
+                    r.set_model_tex_scale('canyon', self.debug_tex_scale)
+                
+                r.set_model_visible('planet', False)
+                r.set_model_visible('canyon', True)
+                r.set_culling(False)
+                r.set_debug_mode(self.debug_render_mode) # Aplica modo salvo (Fullbright default)
+                
+                # Inicializa gizmo se necessário
+                if not self.debug_axes_created:
+                    r.create_axes('axes', length=100.0)
+                    self.debug_axes_created = True
+                
+                r.set_model_visible('axes', self.debug_gizmo_active)
+                
+                try:
+                    r.fit_camera_to_model('canyon', margin=1.2)
+                except Exception:
+                    pass
+                try:
+                    r.set_texture_enabled(self.debug_tex_enabled)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def toggle_image_viewer(self):
+        self.image_viewer_active = not self.image_viewer_active
+        if self.image_viewer_active:
+            self.image_viewer_img = None
+            self.image_zoom = 1.0
+            self.image_offset_x = 0
+            self.image_offset_y = 0
+            self.image_dragging = False
+            self.image_last_mouse = None
+            try:
+                self.reset_image_view()
+            except Exception:
+                pass
+
+    def reset_image_view(self):
+        try:
+            if self.image_viewer_img is None:
+                if os.path.exists(self.image_path):
+                    self.image_viewer_img = pygame.image.load(self.image_path).convert_alpha()
+                else:
+                    return
+            iw, ih = self.image_viewer_img.get_size()
+            sx = LARGURA / float(iw)
+            sy = ALTURA / float(ih)
+            self.image_zoom = min(sx, sy)
+            self.image_offset_x = (LARGURA - int(iw * self.image_zoom)) // 2
+            self.image_offset_y = (ALTURA - int(ih * self.image_zoom)) // 2
+            self.image_dragging = False
+            self.image_last_mouse = None
+        except Exception:
+            pass
+
+    def _update_debug_viewer(self, dt):
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LEFT]:
+            self.debug_yaw -= 1.2 * dt
+        if keys[pygame.K_RIGHT]:
+            self.debug_yaw += 1.2 * dt
+        if keys[pygame.K_UP]:
+            self.debug_pitch = min(0.9, self.debug_pitch + 0.9 * dt)
+        if keys[pygame.K_DOWN]:
+            self.debug_pitch = max(-0.9, self.debug_pitch - 0.9 * dt)
+        
+        # Zoom (W/S) - Logarítmico para precisão perto
+        zoom_speed = 2.0 * dt * max(0.5, self.debug_dist) # Velocidade proporcional à distância (min 0.5 para não travar)
+        if keys[pygame.K_w]:
+            self.debug_dist = max(0.05, self.debug_dist - zoom_speed)
+        if keys[pygame.K_s]:
+            self.debug_dist = min(200.0, self.debug_dist + zoom_speed)
+        
+        # Pan da Câmera (A/D/Q/E) - Move o target
+        # Calcula vetores forward/right baseados no yaw
+        pan_speed = 5.0 * dt * max(0.2, self.debug_dist * 0.1) # Pan escala com zoom
+        
+        # Forward vector (plano XZ)
+        fw_x = math.sin(self.debug_yaw)
+        fw_z = math.cos(self.debug_yaw)
+        # Right vector
+        rt_x = math.cos(self.debug_yaw)
+        rt_z = -math.sin(self.debug_yaw)
+        
+        if keys[pygame.K_a]: # Move Esquerda
+            self.debug_target[0] -= rt_x * pan_speed
+            self.debug_target[2] -= rt_z * pan_speed
+        if keys[pygame.K_d]: # Move Direita
+            self.debug_target[0] += rt_x * pan_speed
+            self.debug_target[2] += rt_z * pan_speed
+        if keys[pygame.K_q]: # Move Baixo (Y-)
+            self.debug_target[1] -= pan_speed
+        if keys[pygame.K_e]: # Move Cima (Y+)
+            self.debug_target[1] += pan_speed
+
+        if keys[pygame.K_1]:
+            self.debug_tex_scale = max(0.0005, self.debug_tex_scale * 0.9)
+            try:
+                r = self.planet_stage.renderer3d
+                if r:
+                    r.set_model_tex_scale('canyon', self.debug_tex_scale)
+            except Exception:
+                pass
+        if keys[pygame.K_2]:
+            self.debug_tex_scale = min(0.05, self.debug_tex_scale * 1.1)
+            try:
+                r = self.planet_stage.renderer3d
+                if r:
+                    r.set_model_tex_scale('canyon', self.debug_tex_scale)
+            except Exception:
+                pass
+        
+        # Debug Modes (F5-F7)
+        if keys[pygame.K_F5]:
+            self.debug_render_mode = 0
+            if self.planet_stage.renderer3d: self.planet_stage.renderer3d.set_debug_mode(0)
+        if keys[pygame.K_F6]:
+            self.debug_render_mode = 1 # Fullbright
+            if self.planet_stage.renderer3d: self.planet_stage.renderer3d.set_debug_mode(1)
+        if keys[pygame.K_F7]:
+            self.debug_render_mode = 2 # Normals
+            if self.planet_stage.renderer3d: self.planet_stage.renderer3d.set_debug_mode(2)
+        
+        # F8 = Toggle Wireframe
+        if keys[pygame.K_F8]:
+            if not getattr(self, 'f8_pressed', False):
+                self.debug_wireframe = not self.debug_wireframe
+                if self.planet_stage.renderer3d: 
+                    self.planet_stage.renderer3d.set_wireframe(self.debug_wireframe)
+                self.f8_pressed = True
+        else:
+            self.f8_pressed = False
+        
+        # Rotação Manual do Modelo (Insert/Delete/Home/End/PgUp/PgDn + Alternatives)
+        rot_speed = 2.0 * dt
+        if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
+            rot_speed *= 3.0
+            
+        # Eixo X: Insert/Delete ou U/J ou Numpad 0/.
+        if keys[pygame.K_INSERT] or keys[pygame.K_u] or keys[pygame.K_KP0]: self.debug_model_rot[0] += rot_speed
+        if keys[pygame.K_DELETE] or keys[pygame.K_j] or keys[pygame.K_KP_PERIOD]: self.debug_model_rot[0] -= rot_speed
+        
+        # Eixo Y: Home/End ou I/K ou Numpad 7/1
+        if keys[pygame.K_HOME] or keys[pygame.K_i] or keys[pygame.K_KP7]:   self.debug_model_rot[1] += rot_speed
+        if keys[pygame.K_END] or keys[pygame.K_k] or keys[pygame.K_KP1]:    self.debug_model_rot[1] -= rot_speed
+        
+        # Eixo Z: PgUp/PgDn ou O/L ou Numpad 9/3
+        if keys[pygame.K_PAGEUP] or keys[pygame.K_o] or keys[pygame.K_KP9]: self.debug_model_rot[2] += rot_speed
+        if keys[pygame.K_PAGEDOWN] or keys[pygame.K_l] or keys[pygame.K_KP3]: self.debug_model_rot[2] -= rot_speed
+        
+        # Toggle Gizmo (H)
+        if keys[pygame.K_h]:
+            # Pequeno debounce seria bom, mas como é update contínuo, vai piscar se segurar. 
+            # Idealmente evento, mas ok para debug rápido.
+            self.debug_gizmo_active = True # Força true se segurar
+            if self.planet_stage.renderer3d:
+                self.planet_stage.renderer3d.set_model_visible('axes', True)
+        
+        x = self.debug_dist * math.cos(self.debug_pitch) * math.sin(self.debug_yaw) + self.debug_target[0]
+        y = self.debug_dist * math.sin(self.debug_pitch) + self.debug_target[1]
+        z = self.debug_dist * math.cos(self.debug_pitch) * math.cos(self.debug_yaw) + self.debug_target[2]
+        try:
+            r = self.planet_stage.renderer3d
+            if r:
+                r.set_camera(pos=(x, y, z), target=tuple(self.debug_target))
+                # Aplica rotação manual E yaw automático (ou remove yaw automático do modelo se for confuso)
+                # O yaw original era (0, self.debug_yaw, 0). Vamos somar a rotação manual.
+                # Mas debug_yaw já controla a câmera orbitando. O modelo deve ficar parado ou rotacionado manualmente.
+                # Vou usar APENAS a rotação manual no modelo.
+                r.set_model_transform('canyon', rotation=tuple(self.debug_model_rot))
+                
+                try:
+                    r.set_texture_enabled(self.debug_tex_enabled)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _draw_debug_viewer(self, screen):
+        r = getattr(self.planet_stage, 'renderer3d', None)
+        if not r or not r.initialized or 'canyon' not in r.models:
+            screen.fill((20, 20, 26))
+            txt = self.fonte.render("Visualizador 3D indisponível", True, (255, 255, 255))
+            screen.blit(txt, (LARGURA//2 - txt.get_width()//2, ALTURA//2))
+            try:
+                reason = getattr(self.planet_stage, "renderer3d_error", None)
+                if not reason and r:
+                    reason = getattr(r, "last_error", None)
+                if reason:
+                    t2 = self.fonte.render(str(reason)[:120], True, (200, 210, 230))
+                    screen.blit(t2, (LARGURA//2 - t2.get_width()//2, ALTURA//2 + 24))
+            except Exception:
+                pass
+            return
+        surf = r.render(clear_color=(0.06, 0.07, 0.10, 1.0))
+        if surf:
+            screen.blit(surf, (0, 0))
+        
+        hud_lines = [
+            f"Viewer 3D | V sai | Setas=Orbita | W/S=Zoom",
+            f"A/D=Pan H | Q/E=Pan V | F5-F7=Modes | F8=Wire",
+            f"Rot Model: Ins/Del(X) Home/End(Y) PgUp/Dn(Z) [Alt: U/J, I/K, O/L]",
+            f"Values: ({self.debug_model_rot[0]:.2f}, {self.debug_model_rot[1]:.2f}, {self.debug_model_rot[2]:.2f})",
+            f"Scale={self.debug_tex_scale:.4f} | T Tex={self.debug_tex_enabled} | Wire={self.debug_wireframe}",
+            f"Cam: Dist={self.debug_dist:.2f} Yaw={math.degrees(self.debug_yaw):.1f} Pitch={math.degrees(self.debug_pitch):.1f} Tgt=({self.debug_target[0]:.1f},{self.debug_target[1]:.1f},{self.debug_target[2]:.1f})"
+        ]
+        
+        y = 10
+        for line in hud_lines:
+            hud = self.fonte.render(line, True, (220, 230, 255))
+            screen.blit(hud, (10, y))
+            y += 24
 
     def disparar_super(self):
         # configura recarga no jogador
@@ -1293,7 +1618,7 @@ class Jogo:
         
         # Posiciona jogador na parte inferior
         self.jogador.x = LARGURA / 2 - self.jogador.largura / 2
-        self.jogador.y = ALTURA - 100
+        self.jogador.y = ALTURA - S(100)
         
         # Cria módulo alvo no topo
         target_stage = self.jogador.stage + 1
@@ -1317,7 +1642,7 @@ class Jogo:
         
         self.jogador.x = max(0, min(LARGURA - self.jogador.largura, self.jogador.x + dx))
         # Trava Y na parte inferior
-        self.jogador.y = ALTURA - self.jogador.altura - 10
+        self.jogador.y = ALTURA - self.jogador.altura - S(10)
         self.jogador.sincronizar_retangulo()
 
         # Move alvo
@@ -1419,7 +1744,7 @@ class Jogo:
         if self.vidas > 0:
             # Respawn anim
             self.invul_timer = 2.0
-            self.jogador.y = ALTURA + 30
+            self.jogador.y = ALTURA + S(30)
             self.jogador.spawn_anim = 1.2
             
             # Reseta inimigos também para dar um respiro

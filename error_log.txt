@@ -2,10 +2,12 @@ Traceback (most recent call last):
   File "c:\Users\usuario\examplegamepoo\main.py", line 7, in <module>
     Jogo().executar()
     ~~~~~~~~~~~~~~~^^
-  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 1185, in executar
+  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 1275, in executar
     self.atualizar(dt)
     ~~~~~~~~~~~~~~^^^^
-  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 355, in atualizar
-    if self.jogador.invul_timer <= 0:
-       ^^^^^^^^^^^^^^^^^^^^^^^^
-AttributeError: 'Jogador' object has no attribute 'invul_timer'
+  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 405, in atualizar
+    result = self.planet_stage.update(dt, self.jogador, self.invul_timer)
+  File "c:\Users\usuario\examplegamepoo\src\core\planet_stage.py", line 422, in update
+    if self.check_collision_3d(invul_timer):
+       ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'PlanetStage' object has no attribute 'check_collision_3d'

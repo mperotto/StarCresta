@@ -8,11 +8,79 @@ def processar_eventos(jogo):
         if evento.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
-        if evento.type == pygame.KEYDOWN and evento.key == pygame.K_s:
+        if evento.type == pygame.KEYDOWN and (evento.key == pygame.K_v or evento.key == pygame.K_F12):
+            try:
+                jogo.toggle_debug_viewer()
+            except Exception:
+                pass
+        if evento.type == pygame.KEYDOWN and evento.key == pygame.K_F9:
             try:
                 jogo.salvar_screenshot()
             except Exception:
                 pass
+        if evento.type == pygame.KEYDOWN and evento.key == pygame.K_i:
+            try:
+                jogo.toggle_image_viewer()
+            except Exception:
+                pass
+        if evento.type == pygame.KEYDOWN and evento.key == pygame.K_t:
+            try:
+                jogo.debug_tex_enabled = not getattr(jogo, "debug_tex_enabled", True)
+                r = getattr(jogo.planet_stage, "renderer3d", None)
+                if r:
+                    r.set_texture_enabled(jogo.debug_tex_enabled)
+            except Exception:
+                pass
+        if evento.type == pygame.KEYDOWN and evento.key == pygame.K_m:
+            try:
+                jogo.debug_tex_mode = 0 if getattr(jogo, "debug_tex_mode", 1) == 1 else 1
+                r = getattr(jogo.planet_stage, "renderer3d", None)
+                if r and hasattr(r, "program"):
+                    r.program['tex_mode'].value = jogo.debug_tex_mode
+            except Exception:
+                pass
+        # Controles do visualizador de imagem (mouse/teclas dedicadas)
+        if getattr(jogo, "image_viewer_active", False):
+            if evento.type == pygame.KEYDOWN and evento.key == pygame.K_r:
+                try:
+                    jogo.reset_image_view()
+                except Exception:
+                    pass
+                continue
+            if evento.type == pygame.MOUSEWHEEL:
+                try:
+                    # zoom incremental com a roda do mouse
+                    fator = 1.1 if evento.y > 0 else 1/1.1
+                    jogo.image_zoom = max(0.05, min(20.0, jogo.image_zoom * fator))
+                except Exception:
+                    pass
+                continue
+            if evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1:
+                try:
+                    jogo.image_dragging = True
+                    jogo.image_last_mouse = getattr(evento, "pos", pygame.mouse.get_pos())
+                except Exception:
+                    pass
+                continue
+            if evento.type == pygame.MOUSEBUTTONUP and evento.button == 1:
+                try:
+                    jogo.image_dragging = False
+                    jogo.image_last_mouse = None
+                except Exception:
+                    pass
+                continue
+            if evento.type == pygame.MOUSEMOTION and getattr(jogo, "image_dragging", False):
+                try:
+                    mx, my = getattr(evento, "pos", pygame.mouse.get_pos())
+                    lx, ly = jogo.image_last_mouse or (mx, my)
+                    dx = mx - lx
+                    dy = my - ly
+                    jogo.image_offset_x += dx
+                    jogo.image_offset_y += dy
+                    jogo.image_last_mouse = (mx, my)
+                except Exception:
+                    pass
+                continue
 
         if jogo.estado == "menu":
             acao = jogo.menu.lidar_evento(evento)
