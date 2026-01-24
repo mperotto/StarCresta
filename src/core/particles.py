@@ -248,6 +248,12 @@ class CampoEstrelas:
             # fallback: cria um flyby normal (não super) para ser promovido futuramente
             self._criar_planeta(force_flyby=True)
 
+    def cancelar_super_flyby(self):
+        # Remove status de super flyby dos planetas para impedir reentrada imediata após falha
+        for p in self.planetas:
+            if getattr(p, 'super_flyby', False):
+                p.super_flyby = False
+
     def tem_super_flyby(self):
         # Verifica se há algum planeta em modo super flyby ativo na tela
         for p in self.planetas:

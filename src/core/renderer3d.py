@@ -227,6 +227,121 @@ class Renderer3D:
             except Exception:
                 pass
 
+    def load_obj(self, name, filepath, scale_factor=1.0):
+        """Carrega modelo .obj (Wavefront) simples."""
+        if not self.initialized: return False
+        
+        try:
+            vertices = [] # v
+            uvs = []      # vt
+            normals = []  # vn
+            
+            final_data = [] # [x,y,z, nx,ny,nz, u,v]
+            
+            # Carrega dados brutos
+            with open(filepath, 'r') as f:
+                for line in f:
+                    if line.startswith('#'): continue
+                    vals = line.split()
+                    if not vals: continue
+                    
+                    if vals[0] == 'v':
+                        vertices.append([float(vals[1]), float(vals[2]), float(vals[3])])
+                    elif vals[0] == 'vt':
+                        uvs.append([float(vals[1]), float(vals[2])])
+                    elif vals[0] == 'vn':
+                        normals.append([float(vals[1]), float(vals[2]), float(vals[3])])
+                    elif vals[0] == 'f':
+                        # Triangulate face
+                        face_verts = vals[1:]
+                        if len(face_verts) < 3: continue
+                        
+                        # Fan triangulation
+                        tris = []
+                        for i in range(1, len(face_verts)-1):
+                            tris.append((face_verts[0], face_verts[i], face_verts[i+1]))
+                        
+                        for t in tris:
+                            for token in t:
+                                parts = token.split('/')
+                                
+                                # Position (1-based)
+                                vi = int(parts[0])
+                                if vi < 0: vi += len(vertices) + 1
+                                vi -= 1
+                                
+                                pos = [0,0,0]
+                                if 0 <= vi < len(vertices):
+                                    pos = vertices[vi]
+                                
+                                # UV
+                                uv = [0.0, 0.0]
+                                if len(parts) > 1 and parts[1]:
+                                    ti = int(parts[1])
+                                    if ti < 0: ti += len(uvs) + 1
+                                    ti -= 1
+                                    if 0 <= ti < len(uvs):
+                                        uv = uvs[ti]
+                                
+                                # Normal
+                                norm = [0.0, 1.0, 0.0]
+                                if len(parts) > 2 and parts[2]:
+                                    ni = int(parts[2])
+                                    if ni < 0: ni += len(normals) + 1
+                                    ni -= 1
+                                    if 0 <= ni < len(normals):
+                                        norm = normals[ni]
+                                    
+                                final_data.extend([pos[0]*scale_factor, pos[1]*scale_factor, pos[2]*scale_factor])
+                                final_data.extend(norm)
+                                final_data.extend(uv)
+            
+            if not final_data: return False
+            
+            vertex_data = np.array(final_data, dtype=np.float32)
+            indices = np.arange(len(vertex_data) // 8, dtype=np.uint32)
+            
+            vbo = self.ctx.buffer(vertex_data.tobytes())
+            ibo = self.ctx.buffer(indices.tobytes())
+            
+            vao = self.ctx.vertex_array(
+                self.program,
+                [(vbo, '3f 3f 2f', 'in_position', 'in_normal', 'in_texcoord')],
+                index_buffer=ibo
+            )
+            
+            # Bounds
+            try:
+                # Extrai apenas posições para calcular bounds
+                # final_data layout: [px,py,pz, nx,ny,nz, u,v] stride 8
+                # Reshape nao funciona direto em lista, e numpy array ja foi criado flat
+                positions_view = vertex_data.reshape(-1, 8)[:, 0:3]
+                mins = positions_view.min(axis=0)
+                maxs = positions_view.max(axis=0)
+                size = maxs - mins
+            except:
+                mins, maxs, size = (0,0,0), (0,0,0), (1,1,1)
+
+            self.models[name] = {
+                'vao': vao,
+                'vbo': vbo,
+                'ibo': ibo,
+                'vertex_count': len(indices),
+                'position': glm.vec3(0, 0, 0),
+                'rotation': glm.vec3(0, 0, 0),
+                'scale': glm.vec3(1, 1, 1),
+                'visible': True,
+                'bounds_min': glm.vec3(*mins),
+                'bounds_max': glm.vec3(*maxs),
+                'bounds_size': glm.vec3(*size)
+            }
+            print(f"[Renderer3D] Modelo OBJ '{name}' carregado: {len(indices)} vértices")
+            return True
+
+        except Exception as e:
+            print(f"[Renderer3D] Erro ao carregar OBJ {filepath}: {e}")
+            return False
+
     def load_glb(self, name, filepath, rotate_x_90=False):
         """Carrega modelo .glb e armazena com nome."""
         if not self.initialized:

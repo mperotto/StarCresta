@@ -110,25 +110,141 @@ class PlanetStage:
         self.cam_x = LARGURA / 2
         self.cam_y = 300 * SCALE # Começa alto e seguro
         self.cam_z = 0.0
-        self.scroll_speed = 0.0 
         self.vel_x = 0.0
         self.vel_y = 0.0
-        self.traveled_distance = 0.0
         self.enemies_killed = 0
+        self.locked_target = None
+        # Parâmetros de Voo (Ajustados para Scale 8.0)
+        # Velocidade aumentada em 300% conforme pedido
+        self.scroll_speed = 1200.0 * SCALE 
+        self.lateral_speed = 900.0 * SCALE
+        
+        # Limites
+        self.max_x = LARGURA * 4
+        self.min_y = 10 * SCALE
+        self.max_y = 2000.0 * SCALE
         
         # Inicialização do Pool de Inimigos e Tiros
         self.enemies = []
         self.shots = []
+        self.enemy_shots = [] # Inicializa a lista de tiros inimigos
         self.enemy_spawn_timer = 0.0
         self.reload_timer = 0.0
         
         if self.renderer3d and self.renderer3d.initialized:
             # Garante protótipos
+            # Debug: Listar arquivos na pasta de modelos para ajudar o usuário
+            try:
+                mdir = get_resource_path(os.path.join('assets', 'models'))
+                if os.path.exists(mdir):
+                    print(f"[DEBUG] Arquivos encontrados em assets/models: {os.listdir(mdir)}")
+                else:
+                    print(f"[DEBUG] Pasta assets/models não existe: {mdir}")
+            except Exception as e:
+                print(f"[DEBUG] Erro ao listar assets: {e}")
+
             if 'enemy_proto' not in self.renderer3d.models:
-                # Inimigo Esfera Ciano (Visível)
-                self.renderer3d.create_sphere('enemy_proto', radius=80 * SCALE, color=(0.0, 1.0, 1.0), segments=12, rings=8)
+                # Tenta carregar modelo 3D externo
+                # Prioridade: GLB -> OBJ -> Esfera
+                paths_to_try = [
+                    ('turret.glb', 'glb'),
+                    ('Star Wars emperor Turret.obj', 'obj'),
+                    ('turret.obj', 'obj'),
+                    ('enemy.glb', 'glb'),
+                    ('enemy.obj', 'obj')
+                ]
+                
+                model_loaded = False
+                for fname, ftype in paths_to_try:
+                    fpath = get_resource_path(os.path.join('assets', 'models', fname))
+                    if os.path.exists(fpath):
+                        print(f"[PlanetStage] Tentando carregar modelo: {fname}")
+                        if ftype == 'glb':
+                            if self.renderer3d.load_glb('enemy_proto', fpath):
+                                self.renderer3d.set_model_transform('enemy_proto', scale=20.0 * SCALE)
+                                model_loaded = True
+                                break
+                        elif ftype == 'obj':
+                            # OBJ pode precisar de ajuste de escala diferente
+                            if self.renderer3d.load_obj('enemy_proto', fpath, scale_factor=10.0 * SCALE):
+                                # --- Auto-Texture Logic ---
+                                base_dir = os.path.dirname(fpath)
+                                # Tenta achar textura: nome_obj.jpg, ou qualquer .jpg na pasta
+                                tex_candidates = [
+                                    fpath.replace('.obj', '.jpg'),
+                                    fpath.replace('.obj', '.png'),
+                                    os.path.join(base_dir, 'texture.jpg'),
+                                    os.path.join(base_dir, 'diffuse.jpg')
+                                ]
+                                # Adiciona todos os jpgs da pasta na lista de candidatos (se glob funcionar)
+                                try:
+                                    import glob
+                                    tex_candidates.extend(glob.glob(os.path.join(base_dir, '*.jpg')))
+                                    tex_candidates.extend(glob.glob(os.path.join(base_dir, '*.png')))
+                                except: pass
+
+                                chosen_tex = None
+                                for t in tex_candidates:
+                                    if os.path.exists(t):
+                                        chosen_tex = t
+                                        break
+                                
+                                if chosen_tex:
+                                    print(f"[PlanetStage] Textura encontrada para OBJ: {chosen_tex}")
+                                    self.renderer3d.load_texture('enemy_tex', chosen_tex)
+                                    self.renderer3d.models['enemy_proto']['texture'] = self.renderer3d.textures['enemy_tex']
+                                    # Modo de mapeamento UV padrão (0)
+                                    self.renderer3d.models['enemy_proto']['tex_mode'] = 0
+                                model_loaded = True
+                                break
+
+                # 2. Se falhou, busca recursiva por QUALQUER coisa parecida com turret/enemy
+                if not model_loaded:
+                    print("[PlanetStage] Busca profunda por modelos em assets/...")
+                    mdir = get_resource_path('assets') # Procura desde a raiz de assets
+                    for root, dirs, files in os.walk(mdir):
+                        for f in files:
+                            lower_f = f.lower()
+                            if (lower_f.endswith('.obj') or lower_f.endswith('.glb')) and ('turret' in lower_f or 'enemy' in lower_f or 'star wars' in lower_f):
+                                fpath = os.path.join(root, f)
+                                print(f"[PlanetStage] Modelo ENCONTRADO na busca profunda: {f}")
+                                
+                                is_obj = lower_f.endswith('.obj')
+                                if is_obj:
+                                     if self.renderer3d.load_obj('enemy_proto', fpath, scale_factor=10.0 * SCALE):
+                                         # Textura
+                                         base_dir = root
+                                         tex_candidates = []
+                                         try:
+                                             import glob
+                                             tex_candidates.extend(glob.glob(os.path.join(base_dir, '*.jpg')))
+                                         except: pass
+                                         if tex_candidates:
+                                             t = tex_candidates[0]
+                                             print(f"Textura para modelo profundo: {t}")
+                                             self.renderer3d.load_texture('enemy_tex', t)
+                                             self.renderer3d.models['enemy_proto']['texture'] = self.renderer3d.textures['enemy_tex']
+                                             self.renderer3d.models['enemy_proto']['tex_mode'] = 0
+                                         model_loaded = True
+                                         break
+                                else:
+                                     if self.renderer3d.load_glb('enemy_proto', fpath):
+                                         self.renderer3d.set_model_transform('enemy_proto', scale=20.0 * SCALE)
+                                         model_loaded = True
+                                         break
+                        if model_loaded: break
+
+                if not model_loaded:
+                    print("[PlanetStage] Modelo não encontrado, usando esfera fallback.")
+                    self.renderer3d.create_sphere('enemy_proto', radius=80 * SCALE, color=(0.0, 1.0, 1.0), segments=12, rings=8)
+                
                 self.renderer3d.set_model_visible('enemy_proto', False)
             
+            # Prototipo do TIRO INIMIGO (Esfera Vermelha)
+            if 'enemy_shot_proto' not in self.renderer3d.models:
+                self.renderer3d.create_sphere('enemy_shot_proto', radius=30 * SCALE, color=(1.0, 0.0, 0.0), segments=8, rings=6)
+                self.renderer3d.set_model_visible('enemy_shot_proto', False)
+
             # Recria Pool de Inimigos (SEMPRE)
             self.enemies = [] # Garante limpo
             for i in range(20):
@@ -136,7 +252,19 @@ class PlanetStage:
                 # Duplicar sobrescreve se já existir, o que é OK
                 self.renderer3d.duplicate_model('enemy_proto', name)
                 self.renderer3d.set_model_visible(name, False)
-                self.enemies.append({'active': False, 'x': 0, 'y': 0, 'z': 0, 'id': name})
+                # Adiciona cooldown de tiro
+                self.enemies.append({
+                    'active': False, 'x': 0, 'y': 0, 'z': 0, 'id': name,
+                    'fire_cooldown': random.uniform(2.0, 10.0) # Tiro inicial aleatório
+                })
+            
+            # Pool de Tiros Inimigos
+            self.enemy_shots = []
+            for i in range(30):
+                name = f'esho_{i}'
+                self.renderer3d.duplicate_model('enemy_shot_proto', name)
+                self.renderer3d.set_model_visible(name, False)
+                self.enemy_shots.append({'active': False, 'id': name, 'x':0, 'y':0, 'z':0, 'vx':0, 'vy':0, 'vz':0, 'life':0})
 
             if 'shot_proto' not in self.renderer3d.models:
                 # Tiro Amarelo Rápido
@@ -410,6 +538,9 @@ class PlanetStage:
             self.banking += (target_bank - self.banking) * 3.0 * dt
             
             # --- COMBATE 3D ---
+            self._update_targeting(dt)
+            self._update_enemy_shots(dt)
+            
             # Tiro (Espaço)
             self.reload_timer -= dt
             if keys[pygame.K_SPACE] and self.reload_timer <= 0:
@@ -646,6 +777,7 @@ class PlanetStage:
         # Radar / HUD de Terreno (Overlay)
         self._draw_radar_hud(s)
         self._draw_tactical_map(s)
+        self._draw_targeting_hud(s)
 
         screen.blit(s, (0, 0))
         if self.state == 'entering':
@@ -1003,41 +1135,26 @@ class PlanetStage:
         center_x_pos = col_idx * OFFSET_LAT_OVERLAP
 
         if 'canyon' in self.renderer3d.models:
-            # Garante clones laterais
-            if 'canyon_L' not in self.renderer3d.models:
-                self.renderer3d.duplicate_model('canyon', 'canyon_L')
-                self.renderer3d.duplicate_model('canyon', 'canyon_R')
-                
-            # Flatten Y scale (0.4 relative to main scale)
+            # --- TILING SYSTEM (Infinite X & Z) ---
+            
+            # 1. Garante clones laterais (L/R) e frontais (Fwd)
+            required_clones = {
+                'canyon_L': 'canyon', 
+                'canyon_R': 'canyon',
+                'canyon_fwd': 'canyon',
+                'canyon_L_fwd': 'canyon',
+                'canyon_R_fwd': 'canyon'
+            }
+            for clone, source in required_clones.items():
+                if clone not in self.renderer3d.models:
+                    self.renderer3d.duplicate_model(source, clone)
+
+            # 2. Configuração de Escala
             flat_scale = (SCALE_VAL, SCALE_VAL * 0.4, SCALE_VAL)
             flat_scale_mirror = (-SCALE_VAL, SCALE_VAL * 0.4, SCALE_VAL)
-            
             Y_POS_FLAT = -5000 
             
-            # Atualiza Central (Ping Pong)
-            if col_idx % 2 == 0:
-                center_scale = flat_scale
-                side_scale = flat_scale_mirror
-            else:
-                center_scale = flat_scale_mirror
-                side_scale = flat_scale
-                
-            self.renderer3d.set_model_transform('canyon', position=(center_x_pos, Y_POS_FLAT, z1), scale=center_scale)
-            # Laterais seguem o padrão alternado
-            self.renderer3d.set_model_transform('canyon_L', position=(center_x_pos - OFFSET_LAT_OVERLAP, Y_POS_FLAT, z1), scale=side_scale)
-            self.renderer3d.set_model_transform('canyon_R', position=(center_x_pos + OFFSET_LAT_OVERLAP, Y_POS_FLAT, z1), scale=side_scale)
-            
-        if 'canyon_next' in self.renderer3d.models:
-             # Garante clones laterais
-            if 'canyon_next_L' not in self.renderer3d.models:
-                self.renderer3d.duplicate_model('canyon_next', 'canyon_next_L')
-                self.renderer3d.duplicate_model('canyon_next', 'canyon_next_R')
-            
-            flat_scale = (SCALE_VAL, SCALE_VAL * 0.4, SCALE_VAL)
-            flat_scale_mirror = (-SCALE_VAL, SCALE_VAL * 0.4, SCALE_VAL)
-            Y_POS_FLAT = -5000
-
-            # Mesma lógica Ping-Pong
+            # Ping-Pong Scale baseado na coluna lateral
             if col_idx % 2 == 0:
                 center_scale = flat_scale
                 side_scale = flat_scale_mirror
@@ -1045,9 +1162,23 @@ class PlanetStage:
                 center_scale = flat_scale_mirror
                 side_scale = flat_scale
 
-            self.renderer3d.set_model_transform('canyon_next', position=(center_x_pos, Y_POS_FLAT, z2), scale=center_scale)
-            self.renderer3d.set_model_transform('canyon_next_L', position=(center_x_pos - OFFSET_LAT_OVERLAP, Y_POS_FLAT, z2), scale=side_scale)
-            self.renderer3d.set_model_transform('canyon_next_R', position=(center_x_pos + OFFSET_LAT_OVERLAP, Y_POS_FLAT, z2), scale=side_scale)
+            # 3. Posicionamento CURRENT BLOCK (z1)
+            # z1 = base_idx * LEN (calculado acima)
+            self.renderer3d.set_model_transform('canyon', 
+                position=(center_x_pos, Y_POS_FLAT, z1), scale=center_scale)
+            self.renderer3d.set_model_transform('canyon_L', 
+                position=(center_x_pos - OFFSET_LAT_OVERLAP, Y_POS_FLAT, z1), scale=side_scale)
+            self.renderer3d.set_model_transform('canyon_R', 
+                position=(center_x_pos + OFFSET_LAT_OVERLAP, Y_POS_FLAT, z1), scale=side_scale)
+
+            # 4. Posicionamento NEXT BLOCK (z2 = (base_idx - 1) * LEN)
+            # Fwd models preenchem o horizonte a frente
+            self.renderer3d.set_model_transform('canyon_fwd', 
+                position=(center_x_pos, Y_POS_FLAT, z2), scale=center_scale)
+            self.renderer3d.set_model_transform('canyon_L_fwd', 
+                position=(center_x_pos - OFFSET_LAT_OVERLAP, Y_POS_FLAT, z2), scale=side_scale)
+            self.renderer3d.set_model_transform('canyon_R_fwd', 
+                position=(center_x_pos + OFFSET_LAT_OVERLAP, Y_POS_FLAT, z2), scale=side_scale)
         
         # Limpa o Fog da entrada (Fundo Azul Claro - Céu Diurno)
         self.renderer3d.set_fog(0.0005, (0.4, 0.6, 0.9)) 
@@ -1111,7 +1242,20 @@ class PlanetStage:
         # Update
         for e in self.enemies:
             if e['active']:
-                # Move levemente em direção ao player? Não, estático é melhor pra começar (minas flutuantes)
+                # MANTÉM NO CHÃO (Recalcula Y)
+                if self.renderer3d:
+                     h = self.renderer3d.get_terrain_height(e['x'], e['z'])
+                     if h > -50000:
+                         e['y'] = h + (50 * SCALE)
+                
+                # Lógica de Tiro Inimigo
+                if 'fire_cooldown' in e:
+                    e['fire_cooldown'] -= dt
+                    # Atira se estiver na frente e dentro do range
+                    if e['fire_cooldown'] <= 0 and e['z'] > self.cam_z - 30000 and e['z'] < self.cam_z - 1000:
+                        self._fire_enemy_shot(e)
+                        e['fire_cooldown'] = random.uniform(2.0, 5.0)
+
                 # Apenas verifica se passou da câmera
                 if e['z'] > self.cam_z + 500:
                     e['active'] = False
@@ -1132,20 +1276,28 @@ class PlanetStage:
                 world_x = (self.cam_x - LARGURA / 2) * 2.0
                 world_y = (self.cam_y - 300.0) * 2.0
                 
-                # Yaw visual
-                yaw_offset = math.sin(self.banking) * 6000.0
-                # Vetor Forward normalizado aproximado
-                # (Isso é um hack, idealmente usariamos matrizes de rotação completas)
-                # Para simplificar: Tiro vai para "Onde estou olhando"
+                s['x'] = world_x
+                s['y'] = world_y
+                s['z'] = self.cam_z - 100 # Começa um pouco a frente
                 
-                target_look_x = world_x + yaw_offset
-                target_look_y = world_y + self.pitch_angle
-                target_look_z = self.cam_z - 2000.0
+                # Direção do Tiro
+                if self.locked_target and self.locked_target['active']:
+                    # TELEGUDIADO (Target Lock)
+                    tx = self.locked_target['x']
+                    ty = self.locked_target['y']
+                    tz = self.locked_target['z']
+                    # print("Disparo Teleguiado!")
+                else:
+                    # Mira Manual (Forward Vector)
+                    yaw_offset = math.sin(self.banking) * 6000.0
+                    tx = world_x + yaw_offset
+                    ty = world_y + self.pitch_angle
+                    tz = self.cam_z - 2000.0
                 
                 # Vetor Direção
-                dx = target_look_x - world_x
-                dy = target_look_y - world_y
-                dz = target_look_z - self.cam_z
+                dx = tx - s['x']
+                dy = ty - s['y']
+                dz = tz - s['z']
                 inv_len = 1.0 / math.sqrt(dx*dx + dy*dy + dz*dz)
                 
                 speed = 20000.0 * SCALE # Tiro muito rápido
@@ -1153,10 +1305,6 @@ class PlanetStage:
                 s['vx'] = dx * inv_len * speed
                 s['vy'] = dy * inv_len * speed
                 s['vz'] = dz * inv_len * speed
-                
-                s['x'] = world_x
-                s['y'] = world_y
-                s['z'] = self.cam_z - 100 # Começa um pouco a frente
                 
                 if self.renderer3d:
                     self.renderer3d.set_model_visible(s['id'], True)
@@ -1292,6 +1440,186 @@ class PlanetStage:
         
         lbl_kills = font.render(f"TARGETS: {self.enemies_killed}/5", True, (255, 50, 50))
         surf.blit(lbl_kills, (x + 5, y + 20))
+
+    def _update_targeting(self, dt):
+        """Atualiza sistema de Target Lock."""
+        best_target = None
+        best_angle = 15.0 # Graus para lock
+        
+        # Posição Mundo da Nave (Aproximada)
+        world_x = (self.cam_x - LARGURA / 2) * 2.0
+        world_y = (self.cam_y - 300.0) * 2.0
+        
+        # Onde a nave está olhando (Aim Vector)
+        yaw_offset = math.sin(self.banking) * 6000.0
+        aim_x = world_x + yaw_offset
+        aim_y = world_y + self.pitch_angle
+        # aim_z = cam_z - 2000
+        
+        # Vetor Direção Mira (Frente)
+        vd_x = aim_x - world_x
+        vd_y = aim_y - world_y
+        vd_z = -2000.0
+        length_v = math.sqrt(vd_x*vd_x + vd_y*vd_y + vd_z*vd_z)
+        if length_v > 0:
+            vd_x /= length_v
+            vd_y /= length_v
+            vd_z /= length_v
+            
+        for e in self.enemies:
+            if not e['active']: continue
+            
+            # Vetor Nave->Inimigo
+            ex = e['x'] - world_x
+            ey = e['y'] - world_y
+            ez = e['z'] - self.cam_z
+            
+            dist = math.sqrt(ex*ex + ey*ey + ez*ez)
+            if dist > 40000: continue # Longe demais
+            if dist < 100: continue # Perto demais
+            
+            # Direção Inimigo Normalizada
+            ed_x = ex / dist
+            ed_y = ey / dist
+            ed_z = ez / dist
+            
+            # Dot Product (Cosseno do ângulo)
+            dot = vd_x*ed_x + vd_y*ed_y + vd_z*ed_z
+            dot = max(-1.0, min(1.0, dot))
+            
+            angle = math.degrees(math.acos(dot))
+            
+            if angle < best_angle:
+                best_angle = angle
+                best_target = e
+                
+        self.locked_target = best_target
+
+    def _draw_targeting_hud(self, surf):
+        """Desenha caixa de mira no alvo travado."""
+        if not self.locked_target or not self.locked_target['active']:
+            return
+            
+        e = self.locked_target
+        
+        # Projeção 3D -> 2D (Aproximação)
+        rel_x = e['x'] - self.cam_x
+        rel_y = e['y'] - self.cam_y
+        rel_z = e['z'] - self.cam_z # Z negativo na frente
+        
+        depth = -rel_z
+        if depth < 10: return
+        
+        fov_scale = LARGURA * 1.5 # Ajuste empirico do FOV
+        
+        # Rotação Banking (Z-Roll inverso da camera)
+        cos_b = math.cos(-self.banking)
+        sin_b = math.sin(-self.banking)
+        
+        rx = rel_x * cos_b - rel_y * sin_b
+        ry = rel_x * sin_b + rel_y * cos_b
+        
+        sx = LARGURA / 2 + (rx / depth) * fov_scale
+        sy = ALTURA / 2 - (ry / depth) * fov_scale
+        
+        # Ajuste vertical manual (Pitch compensado)
+        sy -= (self.pitch_angle / 300.0) * (LARGURA/4) # Calibracao empirica
+        
+        size = 60000.0 / depth 
+        size = max(30, min(120, size))
+        
+        rect = pygame.Rect(0, 0, size, size)
+        rect.center = (sx, sy)
+        
+        # Só desenha se estiver na tela
+        if -100 < sx < LARGURA + 100 and -100 < sy < ALTURA + 100:
+             # Caixa Verde e Texto LOCK
+             pygame.draw.rect(surf, (0, 255, 0), rect, 2)
+             
+             # Retícula
+             gap = 5
+             pygame.draw.line(surf, (0, 255, 0), (rect.left, rect.centery), (rect.left-gap, rect.centery), 2)
+             pygame.draw.line(surf, (0, 255, 0), (rect.right, rect.centery), (rect.right+gap, rect.centery), 2)
+             pygame.draw.line(surf, (0, 255, 0), (rect.centerx, rect.top), (rect.centerx, rect.top-gap), 2)
+             pygame.draw.line(surf, (0, 255, 0), (rect.centerx, rect.bottom), (rect.centerx, rect.bottom+gap), 2)
+             
+             dist_km = math.sqrt(rel_x**2 + rel_y**2 + rel_z**2) / 1000.0
+             font = pygame.font.SysFont("Arial", 12, bold=True)
+             lbl = font.render(f"LOCK {dist_km:.1f}km", True, (0, 255, 0))
+             surf.blit(lbl, (rect.right + 5, rect.top))
+
+    def _fire_enemy_shot(self, enemy):
+        """Dispara tiro do inimigo em direção ao player."""
+        if not hasattr(self, 'enemy_shots'): return
+        
+        for s in self.enemy_shots:
+             if not s['active']:
+                 s['active'] = True
+                 # Posição inicial (em cima do inimigo)
+                 s['x'], s['y'], s['z'] = enemy['x'], enemy['y'] + 150*SCALE, enemy['z']
+                 
+                 # Alvo: Player
+                 target_x = (self.cam_x - LARGURA / 2) * 2.0
+                 target_y = (self.cam_y - 300.0) * 2.0
+                 target_z = self.cam_z 
+                 
+                 # Vetor Direção
+                 dx = target_x - s['x']
+                 dy = target_y - s['y']
+                 dz = target_z - s['z']
+                 dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                 
+                 if dist == 0: dist = 1
+                 
+                 speed = 8000.0 * SCALE 
+                 
+                 s['vx'] = (dx/dist) * speed
+                 s['vy'] = (dy/dist) * speed
+                 s['vz'] = (dz/dist) * speed
+                 s['life'] = 5.0 
+                 
+                 if self.renderer3d:
+                     self.renderer3d.set_model_visible(s['id'], True)
+                 break
+
+    def _update_enemy_shots(self, dt):
+        """Atualiza física e colisão dos tiros inimigos."""
+        if not hasattr(self, 'enemy_shots'): return
+        
+        player_x = (self.cam_x - LARGURA / 2) * 2.0
+        player_y = (self.cam_y - 300.0) * 2.0
+        player_z = self.cam_z
+        player_radius = 200 * SCALE 
+        
+        for s in self.enemy_shots:
+            if s['active']:
+                s['x'] += s['vx'] * dt
+                s['y'] += s['vy'] * dt
+                s['z'] += s['vz'] * dt
+                s['life'] -= dt
+                
+                if self.renderer3d:
+                    self.renderer3d.set_model_transform(s['id'], position=(s['x'], s['y'], s['z']))
+                
+                # Colisão
+                dx = s['x'] - player_x
+                dy = s['y'] - player_y
+                dz = s['z'] - player_z
+                dist_sq = dx*dx + dy*dy + dz*dz
+                
+                if dist_sq < player_radius**2:
+                     print("PLAYER HIT BY ENEMY!!")
+                     s['active'] = False
+                     if self.renderer3d: self.renderer3d.set_model_visible(s['id'], False)
+                     
+                     # Feedback de Dano (Shake)
+                     self.cam_x += random.randint(-100, 100)
+                     self.cam_y += random.randint(-100, 100)
+                     # self.enemies_killed -= 1 # Penalidade? Melhor não.
+                     
+                if s['life'] <= 0 or s['z'] < self.cam_z - 2000:
+                    s['active'] = False
+                    if self.renderer3d: self.renderer3d.set_model_visible(s['id'], False)
     
     def _update_descent(self, dt):
         """Atualiza a fase de descida 3D com fog."""

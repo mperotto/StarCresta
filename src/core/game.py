@@ -34,25 +34,22 @@ class Jogo:
         pygame.init()
         pygame.display.set_caption("StarCresta")
         
-        # Detecta resolução do monitor
+        # Ajuste Automático de Resolução
         info = pygame.display.Info()
-        monitor_w, monitor_h = info.current_w, info.current_h
+        # Detecta resolução nativa atual (ex: 1366x766 ou 4k, etc)
+        self.largura_tela = info.current_w if info.current_w > 0 else LARGURA
+        self.altura_tela = info.current_h if info.current_h > 0 else ALTURA
         
-        # Define resolução alvo (mantendo aspect ratio se possível, ou usando nativa)
-        # Se o monitor for menor que 1920x1080, ajusta
-        if monitor_w < LARGURA or monitor_h < ALTURA:
-            self.largura_tela = monitor_w
-            self.altura_tela = monitor_h
-            # Recalcula SCALE para renderização (opcional, mas complexo pois afeta lógica)
-            # Melhor abordagem: Renderizar em surface interna 1920x1080 e escalar para tela
-            self.usar_escala = True
-        else:
-            self.largura_tela = LARGURA
-            self.altura_tela = ALTURA
-            self.usar_escala = False
-            
+        print(f"[Sistema] Resolução detectada: {self.largura_tela}x{self.altura_tela} - Modo Escala: ATIVADO")
+
+        # Cria janela fullscreen na resolução nativa
         self.tela_real = pygame.display.set_mode((self.largura_tela, self.altura_tela), pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF)
-        self.tela = pygame.Surface((LARGURA, ALTURA)) # Surface interna lógica
+        
+        # Surface interna lógica fixa (1920x1080 - definida em settings.py)
+        self.tela = pygame.Surface((LARGURA, ALTURA)) 
+        
+        # Sempre usa escala para adaptar o conteúdo lógico à tela física
+        self.usar_escala = True
         
         self.relogio = pygame.time.Clock()
         self.fonte = pygame.font.SysFont(None, 22)
@@ -74,7 +71,7 @@ class Jogo:
         
         # Move mouse para o canto para não atrapalhar
         try:
-            pygame.mouse.set_pos(LARGURA, 0)
+            pygame.mouse.set_pos(self.largura_tela, 0)
         except:
             pass
             
@@ -412,12 +409,17 @@ class Jogo:
                     self.jogador.receber_dano()
                     self.vidas -= 1
                     self.invul_timer = 2.0
+                    # Zera poderes
+                    self.player_shield_timer = 0.0
+                    self.upgrade_super_timer = 0.0
                     # Empurra jogador para o centro para não ficar preso na parede
                     self.jogador.x = LARGURA / 2 - self.jogador.largura / 2
                 
             # Falha de reentrada (sem escudo)
             if result == 'failed':
                 self.vidas -= 1
+                self.player_shield_timer = 0.0
+                self.upgrade_super_timer = 0.0
                 cx = self.jogador.x + self.jogador.largura/2
                 cy = self.jogador.y + self.jogador.altura/2
                 self.particulas.spawn_ao_redor(cx, cy, intensidade=50, raio=40, 
@@ -429,6 +431,10 @@ class Jogo:
                 self.jogador.matar()
                 txt = self.fonte_grande.render("REENTRY FAILURE!", True, (255, 80, 60))
                 self.fx_texts.append({'surf': txt, 'pos': (LARGURA//2 - txt.get_width()//2, ALTURA//2), 't': 0.0, 'dur': 2.0, 'vy': -20})
+                
+                # Cancela o evento planetário para evitar loop de reentrada no respawn
+                self.fundo.cancelar_super_flyby()
+                
                 self.in_planet_stage = False
                 self.estado = 'jogando'
                 return
@@ -670,8 +676,14 @@ class Jogo:
                 
                 if perdeu_vida:
                     self.vidas -= 1
+                    # Ao morrer (perder vida), zera os poderes temporários
+                    self.player_shield_timer = 0.0
+                    self.upgrade_super_timer = 0.0
                 else:
                     self.invul_timer = 2.0 # Invencibilidade ao perder parte
+                    # Ao perder uma nave acoplada, também zera os poderes (conforme pedido)
+                    self.player_shield_timer = 0.0
+                    self.upgrade_super_timer = 0.0
                     
                 # som de dano
                 # som de dano
@@ -1729,6 +1741,8 @@ class Jogo:
         # Penalidade: Perde uma vida e reseta para estágio anterior (ou perde estágio e vida)
         self.vidas -= 1
         self.jogador.stage = max(1, self.jogador.stage - 1)
+        self.player_shield_timer = 0.0
+        self.upgrade_super_timer = 0.0
 
         self.target_module = None
         self.estado = 'jogando'

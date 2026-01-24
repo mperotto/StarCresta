@@ -2,12 +2,16 @@ Traceback (most recent call last):
   File "c:\Users\usuario\examplegamepoo\main.py", line 7, in <module>
     Jogo().executar()
     ~~~~~~~~~~~~~~~^^
-  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 1275, in executar
-    self.atualizar(dt)
-    ~~~~~~~~~~~~~~^^^^
-  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 405, in atualizar
-    result = self.planet_stage.update(dt, self.jogador, self.invul_timer)
-  File "c:\Users\usuario\examplegamepoo\src\core\planet_stage.py", line 422, in update
-    if self.check_collision_3d(invul_timer):
-       ^^^^^^^^^^^^^^^^^^^^^^^
-AttributeError: 'PlanetStage' object has no attribute 'check_collision_3d'
+  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 1274, in executar
+    self.lidar_com_eventos()
+    ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "c:\Users\usuario\examplegamepoo\src\core\game.py", line 381, in lidar_com_eventos
+    processar_eventos(self)
+    ~~~~~~~~~~~~~~~~~^^^^^^
+  File "c:\Users\usuario\examplegamepoo\src\core\event_handler.py", line 122, in processar_eventos
+    jogo.planet_stage.start(None, no_shield=False)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\usuario\examplegamepoo\src\core\planet_stage.py", line 119, in start
+    self.scroll_speed = 1200.0 * SCALE_VAL
+                                 ^^^^^^^^^
+NameError: name 'SCALE_VAL' is not defined
