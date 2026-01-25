@@ -86,10 +86,9 @@ class Jogo:
         self.tempo_carregando = 0.0
         self.sinalizou_super_pronto = False
         self.upgrade_super_timer = 0.0  # buff temporário (s)
-        self.player_shield_timer = 0.0
-        self.player_shield_layers = 0 # Camadas de força do escudo
-        self.player_shield_hits = 0   # Acumulador de dano no escudo
-        self.shield_decay_multiplier = 1.0 # Multiplicador de decaimento do tempo (acelera quando escudo fraco)
+        self.player_shield_layers = 0
+        self.player_shield_hp = 3 # Vida da camada atual (reduzido de 10 para 3)
+        self.time_without_shield = 0.0
         self.vidas = 3
         self.invul_timer = 0.0
         
@@ -229,9 +228,10 @@ class Jogo:
         self.sinalizou_super_pronto = False
         self.upgrade_super_timer = 0.0
         self.player_shield_timer = 0.0
+        self.upgrade_super_timer = 0.0
         self.player_shield_layers = 0
-        self.player_shield_hits = 0
-        self.shield_decay_multiplier = 1.0
+        self.player_shield_hp = 3
+        self.time_without_shield = 0.0
         self.invul_timer = 0.0
         self.game_over_fx_active = False
         self.fx_texts = []
@@ -419,7 +419,8 @@ class Jogo:
                     self.vidas -= 1
                     self.invul_timer = 4.0
                     # Zera poderes
-                    self.player_shield_timer = 0.0
+                    self.player_shield_layers = 0
+                    self.player_shield_hp = 3
                     self.upgrade_super_timer = 0.0
                     self.jogador.nivel_arma = 0
                     # Empurra jogador para o centro para não ficar preso na parede
@@ -428,7 +429,7 @@ class Jogo:
             # Falha de reentrada (sem escudo)
             if result == 'failed':
                 self.vidas -= 1
-                self.player_shield_timer = 0.0
+                self.player_shield_layers = 0
                 self.upgrade_super_timer = 0.0
                 self.jogador.nivel_arma = 0
                 cx = self.jogador.x + self.jogador.largura/2
@@ -574,10 +575,14 @@ class Jogo:
                 self.ufo_siren_on = False
             return
             
-        # Atualiza timers de power-ups
-        if self.player_shield_timer > 0:
-            # Decaimento acelerado se o multiplicador for > 1.0
-            self.player_shield_timer = max(0.0, self.player_shield_timer - dt * self.shield_decay_multiplier)
+        # Monitora tempo sem escudo para boost de drops
+        if self.player_shield_layers == 0:
+            self.time_without_shield += dt
+        else:
+            self.time_without_shield = 0.0
+        
+        # Ativa boost de drops se necessario
+        self.upgrades.boost_shield = (self.time_without_shield > 15.0)
 
         if self.upgrade_super_timer > 0:
             self.upgrade_super_timer = max(0.0, self.upgrade_super_timer - dt)
@@ -684,17 +689,12 @@ class Jogo:
         else:
             inimigo = self.inimigos.verificar_colisao_com_jogador(self.jogador)
             if inimigo:
-                # Se tiver escudo
-                if self.player_shield_timer > 0:
-                    # Lógica unificada de dano no escudo
-                    self.player_shield_hits += 1
-                    if self.player_shield_layers > 1:
-                        if self.player_shield_hits >= 10:
-                            self.player_shield_layers -= 1
-                            self.player_shield_hits = 0
-                    else:
-                        # Se só tem 1 camada, Acelera o decaimento em vez de perder tempo fixo
-                        self.shield_decay_multiplier += 0.5
+                if self.player_shield_layers > 0:
+                    # Dano no escudo (HP)
+                    self.player_shield_hp -= 1
+                    if self.player_shield_hp <= 0:
+                        self.player_shield_layers -= 1
+                        self.player_shield_hp = 3 # Reseta HP para próxima camada
                     
                     # Inimigo morre se nao for boss
                     if not isinstance(inimigo, Boss):
@@ -711,7 +711,7 @@ class Jogo:
                 if perdeu_vida:
                     self.vidas -= 1
                     # Ao morrer (perder vida), zera os poderes temporários
-                    self.player_shield_timer = 0.0
+                    self.player_shield_layers = 0
                     self.upgrade_super_timer = 0.0
                     self.jogador.nivel_arma = 0
                 else:
@@ -780,13 +780,72 @@ class Jogo:
                         if d.retangulo.colliderect(hb):
                             hitado = True
                             break
-                    if not hitado:
-                        continue
-                        try:
-                            self.jogador.spawn_anim = 1.2
-                        except Exception:
-                            pass
-                    break
+                    if hitado:
+                        if self.player_shield_layers > 0:
+                            self.player_shield_hp -= 1
+                            if self.player_shield_hp <= 0:
+                                self.player_shield_layers -= 1
+                                self.player_shield_hp = 3
+                            d.matar() # Destrói o destroço ao atingir o escudo
+                        else:
+                            # Tenta reduzir estágio primeiro
+                            perdeu_vida = self.jogador.receber_dano()
+                            if perdeu_vida:
+                                self.vidas -= 1
+                                self.player_shield_layers = 0
+                                self.upgrade_super_timer = 0.0
+                                self.jogador.nivel_arma = 0
+                            else:
+                                self.invul_timer = 4.0
+                                self.player_shield_layers = 0
+                                self.upgrade_super_timer = 0.0
+                            d.matar() # Destrói o destroço ao atingir o jogador
+                            # som de dano
+                            if hasattr(self, 'sfx_damage') and self.sfx_damage:
+                                try:
+                                    self.sfx_damage.play()
+                                except Exception:
+                                    pass
+                            # efeito ao ser atingido (mini explosão e partículas)
+                            cx = self.jogador.x + self.jogador.largura/2
+                            cy = self.jogador.y + self.jogador.altura/2
+                            self.particulas.spawn_ao_redor(cx, cy, intensidade=18, raio=25,
+                                                           cores=[(255, 160, 160), (255, 200, 200), (200, 230, 255)], vel_base=60, vel_var=120)
+                            if hasattr(self, 'sfx_explosion_small') and self.sfx_explosion_small:
+                                try: self.sfx_explosion_small.play()
+                                except Exception: pass
+                            if self.vidas <= 0:
+                                # Game Over logic (similar to enemy collision)
+                                cx = self.jogador.x + self.jogador.largura/2
+                                cy = self.jogador.y + self.jogador.altura/2
+                                self.particulas.spawn_ao_redor(cx, cy, intensidade=36, raio=34,
+                                                               cores=[(255, 200, 200), (255, 240, 220), (180, 220, 255)],
+                                                               vel_base=80, vel_var=160)
+                                if hasattr(self, 'sfx_explosion_big') and self.sfx_explosion_big:
+                                    try: self.sfx_explosion_big.play()
+                                    except Exception: pass
+                                elif hasattr(self, 'sfx_explosion_small') and self.sfx_explosion_small:
+                                    try: self.sfx_explosion_small.play()
+                                    except Exception: pass
+                                try:
+                                    pygame.mixer.music.fadeout(1200)
+                                except Exception:
+                                    pass
+                                self.game_over_fx_active = True
+                                self.game_over_fx_t = 0.0
+                                self.game_over_fx_pos = (cx, cy)
+                                self.game_over_fx_emit = 0.0
+                                self.jogador.matar()
+                                self.estado = 'game_over'
+                                self._iniciar_entrada_iniciais()
+                            else:
+                                self.invul_timer = 4.0
+                                self.jogador.y = ALTURA + S(30)
+                                try:
+                                    self.jogador.spawn_anim = 1.2
+                                except Exception:
+                                    pass
+                        break # Sai do loop de destroços após a primeira colisão
 
         # Carregamento do super ao segurar espaço
         if self.estado == 'jogando' and self.laser_wave_expire is None:
@@ -837,10 +896,15 @@ class Jogo:
                     except Exception:
                         pass
             elif efeito == 'shield':
-                self.player_shield_timer += 10.0  # Acumula tempo
-                self.player_shield_layers = 5 # Reseta para 5 camadas (força máxima)
-                self.player_shield_hits = 0
-                self.shield_decay_multiplier = 1.0 # Reseta decaimento
+                # Prioridade: Regenerar dano da camada atual, depois adicionar nova
+                if self.player_shield_layers > 0 and self.player_shield_hp < 3:
+                     self.player_shield_hp = 3
+                elif self.player_shield_layers < 5:
+                    self.player_shield_layers += 1
+                    self.player_shield_hp = 3
+                
+                self.time_without_shield = 0.0 # Reseta contador de "falta de escudo"
+                
                 if hasattr(self, 'sfx_powerup') and self.sfx_powerup:
                     try:
                         self.sfx_powerup.play()
@@ -1031,7 +1095,7 @@ class Jogo:
                     
                 hitado = any(t.retangulo.colliderect(hb) for hb in player_hitboxes)
                 if hitado:
-                    if self.player_shield_timer <= 0:
+                    if self.player_shield_layers <= 0:
                         perdeu_vida = self.jogador.receber_dano()
                         if perdeu_vida:
                             self.vidas -= 1
@@ -1078,19 +1142,11 @@ class Jogo:
                             except Exception:
                                 pass
                     else:
-                        # Escudo Ativo: Processa camadas
-                        self.player_shield_hits += 1
-                        
-                        if self.player_shield_layers > 1:
-                            # Se tem camadas de sobra, a cada 10 tiros perde 1
-                            reduction_threshold = 10
-                            if self.player_shield_hits >= reduction_threshold:
-                                self.player_shield_layers -= 1
-                                self.player_shield_hits = 0
-                                # visual/som de camada caindo (opcional)
-                        else:
-                            # Se só tem 1 camada, Acelera o decaimento
-                            self.shield_decay_multiplier += 0.5
+                        # Escudo Ativo: HP Damage
+                        self.player_shield_hp -= 1
+                        if self.player_shield_hp <= 0:
+                            self.player_shield_layers -= 1
+                            self.player_shield_hp = 3
                         
                         t.matar() # Tiro morre no escudo
 
@@ -1271,7 +1327,8 @@ class Jogo:
             self.tela.blit(fase_txt, box)
 
         upg_txt = f"{self.upgrade_super_timer:0.1f}s" if self.upgrade_super_timer > 0 else "—"
-        shield_txt = f"{self.player_shield_timer:0.1f}s ({self.player_shield_layers}L)" if self.player_shield_timer > 0 else "—"
+        upg_txt = f"{self.upgrade_super_timer:0.1f}s" if self.upgrade_super_timer > 0 else "—"
+        shield_txt = f"{self.player_shield_hp}/3 ({self.player_shield_layers}L)" if self.player_shield_layers > 0 else "—"
         hud = self.fonte.render(f"Pontuação: {self.pontuacao}  |  Vidas: {self.vidas}  |  Upgrade V: {upg_txt}  |  Shield: {shield_txt}", True, (220, 230, 255))
         self.tela.blit(hud, (10, 10))
         rec_name, rec_score, rec_phase = self.score_manager.get_high_holder()
@@ -1290,7 +1347,7 @@ class Jogo:
             if int(pygame.time.get_ticks() / 100) % 2 == 0:
                 pygame.draw.rect(self.tela, (255, 255, 255), self.jogador.retangulo, 2)
         # desenha campo de força do jogador (apenas fora do mini‑game)
-        if self.player_shield_timer > 0 and not self.in_planet_stage:
+        if self.player_shield_layers > 0 and not self.in_planet_stage:
             cx = int(self.jogador.x + self.jogador.largura/2)
             cy = int(self.jogador.y + self.jogador.altura/2)
             base_r = max(self.jogador.largura, self.jogador.altura) * 0.9
@@ -1298,13 +1355,12 @@ class Jogo:
             # Desenha múltiplas camadas com gap
             camadas = max(1, self.player_shield_layers)
             
-            # Se só tem 1 camada e pouco tempo, pisca
-            should_flash = (camadas == 1 and self.player_shield_timer <= 3.0)
+            # Pisca se HP baixo na última camada
+            should_flash = (self.player_shield_layers == 1 and self.player_shield_hp <= 3)
             visible = True
             
             if should_flash:
-                 flash_speed = 200 - int(self.player_shield_timer * 50)
-                 if int(pygame.time.get_ticks() / flash_speed) % 2 != 0:
+                 if int(pygame.time.get_ticks() / 150) % 2 != 0:
                      visible = False
             
             if visible:
@@ -1318,27 +1374,21 @@ class Jogo:
                     color = (100, min(255, g), 255)
                     pygame.draw.circle(self.tela, color, (cx, cy), r, 2)
             
-            # Barra de tempo do escudo abaixo do jogador
+            # Barra de VIDA do escudo (HP) abaixo do jogador
             bar_w = 40
             bar_h = 4
             bar_x = cx - bar_w // 2
-            bar_y = cy + base_r + 15 # Abaixo do player
+            bar_y = cy + base_r + 15 
             
             # Fundo da barra
             pygame.draw.rect(self.tela, (50, 50, 80), (bar_x, bar_y, bar_w, bar_h))
             
-            # Preenchimento proporcional (assumindo 10s como base cheia, mas permitindo overflow visual)
-            # Se o tempo for muito alto, a barra fica cheia
-            pct = min(1.0, self.player_shield_timer / 10.0)
+            # Preenchimento proporcional ao HP
+            pct = min(1.0, self.player_shield_hp / 3.0)
             fill_w = int(bar_w * pct)
             
-            # Cor muda se estiver decaindo rápido
-            if self.shield_decay_multiplier > 1.5:
-                # Vermelho/Laranja piscante se estiver instável
-                mc = (255, 100, 50) if int(pygame.time.get_ticks()/100)%2==0 else (255, 200, 50)
-            else:
-                # Amarelo Ouro para destacar do Ciano do escudo
-                mc = (255, 220, 0)
+            # Cor Verde para HP (Segurança)
+            mc = (0, 255, 100)
                 
             pygame.draw.rect(self.tela, mc, (bar_x, bar_y, fill_w, bar_h))
             pygame.draw.rect(self.tela, (200, 200, 200), (bar_x, bar_y, bar_w, bar_h), 1)
