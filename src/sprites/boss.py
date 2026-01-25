@@ -6,20 +6,28 @@ from src.sprites.enemy import Inimigo, TiroInimigo
 from src.assets import carregar_sprite_boss
 
 class Boss(Inimigo):
-    def __init__(self, x, y):
-        # Boss grande e resistente
-        super().__init__(x, y, largura=128, altura=128, vida=400, cor=(100, 0, 100))
+    def __init__(self, x, y, fase=1):
+        self.fase = fase
+        fator_dificuldade = 1.0 + (max(0, fase - 1) * 0.15)
+        
+        # Boss grande e resistente (Vida escala com a fase)
+        vida_base = 200
+        super().__init__(x, y, largura=128, altura=128, vida=int(vida_base * fator_dificuldade), cor=(100, 0, 100))
+        
         self.sprite = carregar_sprite_boss(self.largura, self.altura)
         self.estado = 'entrando' # entrando, ocioso, atacando
         self.tempo_estado = 0.0
         self.alvo_y = 80
-        self.velocidade_x = 100 * SCALE
+        
+        # Velocidade escala levemente
+        self.velocidade_x = 100 * SCALE * (1.0 + (max(0, fase - 1) * 0.05))
         self.direcao_x = 1
+        
         # mergulho/agressividade
         self.allow_dive = False
         self.dive_cooldown = random.uniform(5.0, 8.0)
         self.dive_target_y = ALTURA * 0.78
-        self.dive_speed = 320 * SCALE
+        self.dive_speed = 320 * SCALE * (1.0 + (max(0, fase - 1) * 0.08))
         self.dive_target_x = None
         
         
@@ -119,11 +127,45 @@ class Boss(Inimigo):
             # O jogo chama tentar_atirar se estado == 'atacando'. Vamos permitir no mergulho também.
             
             if self.y >= self.dive_target_y:
-                self.estado = 'subindo'
+                # Se for nível alto (>= 4), em vez de subir direto, ele sobe caçando
+                if self.fase >= 4:
+                    self.estado = 'caçando_subida'
+                else:
+                    self.estado = 'subindo'
                 self.tempo_estado = 0.0
         elif self.estado == 'subindo':
             self.y -= self.dive_speed * 0.9 * dt
             self.x = max(0, min(LARGURA - self.largura, self.x))
+            if self.y <= self.alvo_y:
+                self.y = self.alvo_y
+                self.estado = 'ocioso'
+                self.tempo_estado = 0.0
+                target_angle = 0.0
+        elif self.estado == 'caçando_subida':
+            # Sobe mais devagar enquanto persegue o jogador horizontalmente e atira
+            self.y -= self.dive_speed * 0.45 * dt # Metade da velocidade de subida normal
+            
+            # Perseguição horizontal
+            if hasattr(self, 'target_player_x'):
+                dx = self.target_player_x - (self.x + self.largura/2)
+                # Velocidade de perseguição lateral
+                chase_speed = self.velocidade_x * 1.5
+                move_x = chase_speed * dt
+                if abs(dx) < move_x:
+                    self.x += dx
+                else:
+                    self.x += move_x * (1 if dx > 0 else -1)
+                
+                # Inclina na direção do movimento
+                target_angle = -self.max_angulo * (1 if dx > 0 else -1)
+            
+            # Limites laterais
+            self.x = max(0, min(LARGURA - self.largura, self.x))
+            
+            # Força tiros durante a subida (tiro direto ou chuva)
+            if self.cd_ataque > 0.3:
+                self.cd_ataque = 0.3
+            
             if self.y <= self.alvo_y:
                 self.y = self.alvo_y
                 self.estado = 'ocioso'
@@ -140,7 +182,7 @@ class Boss(Inimigo):
                 self.angulo += change * (1 if diff > 0 else -1)
 
     def tentar_atirar(self, gerenciador_tiros, jogador, asteroides, dif_mult=1.0):
-        if self.estado != 'atacando' and self.estado != 'mergulho':
+        if self.estado != 'atacando' and self.estado != 'mergulho' and self.estado != 'caçando_subida':
             return
 
         self.cd_ataque -= 0.016 # Aproximação de dt, idealmente passaria dt aqui
@@ -173,8 +215,10 @@ class Boss(Inimigo):
         angulos = [-30, -15, 0, 15, 30]
         for ang in angulos:
             rad = math.radians(ang + self.angulo) # Ajusta tiro com a inclinação
-            vx = 200 * math.sin(rad)
-            vy = 200 * math.cos(rad)
+            # Velocidade do tiro escala com fase
+            speed = 200 * (1.0 + (self.fase - 1) * 0.08)
+            vx = speed * math.sin(rad)
+            vy = speed * math.cos(rad)
             gerenciador_tiros.criar(TiroInimigo(cx, cy, vx=vx, vy=vy))
 
     def _ataque_direto(self, gerenciador_tiros, jogador):
@@ -184,9 +228,11 @@ class Boss(Inimigo):
         dx = (jogador.x + jogador.largura/2) - cx
         dy = (jogador.y + jogador.altura/2) - cy
         dist = math.hypot(dx, dy)
+        dist = math.hypot(dx, dy)
         if dist > 0:
-            vx = (dx / dist) * 350
-            vy = (dy / dist) * 350
+            speed = 350 * (1.0 + (self.fase - 1) * 0.1)
+            vx = (dx / dist) * speed
+            vy = (dy / dist) * speed
             gerenciador_tiros.criar(TiroInimigo(cx, cy, vx=vx, vy=vy))
 
     def _ataque_chuva(self, gerenciador_tiros):

@@ -125,12 +125,21 @@ class Planeta:
 
     def _atualizar_sprite(self):
         escala = self.escala_atual
-        # Se for super flyby, permite crescer muito mais
-        limit = 4.0 if self.super_flyby else 1.2
+        # Limita o tamanho máximo para evitar destruir a performance (superfícies > 2k matam FPS)
+        # Aumentado para 3.5x para restaurar impacto visual (usando scale() para manter performance)
+        limit = 3.5 if self.super_flyby else 1.2
         max_w = int(min(LARGURA, ALTURA) * limit)
-        w = max(32, min(max_w, int(self.imagem_base.get_width() * escala * SCALE)))
-        h = max(32, min(max_w, int(self.imagem_base.get_height() * escala * SCALE)))
-        self.sprite = pygame.transform.smoothscale(self.imagem_base, (w, h))
+        
+        raw_w = int(self.imagem_base.get_width() * escala * SCALE)
+        raw_h = int(self.imagem_base.get_height() * escala * SCALE)
+        
+        w = max(32, min(max_w, raw_w))
+        h = max(32, min(max_w, raw_h))
+        
+        if self.super_flyby or w > 512:
+            self.sprite = pygame.transform.scale(self.imagem_base, (w, h))
+        else:
+            self.sprite = pygame.transform.smoothscale(self.imagem_base, (w, h))
         self.raio = max(w, h) // 2
 
     def atualizar(self, dt):
@@ -145,9 +154,25 @@ class Planeta:
                 base = 1.1
             lerp = 1 - math.exp(-dt * base)
             self.escala_atual = self.escala_atual + (alvo - self.escala_atual) * lerp
-            if self.rescale_cd <= 0.0 and abs(alvo - self.escala_atual) > 0.005:
+            
+            # Se a escala já saturou no limite visual, não precisa ficar recriando sprite
+            limit_scale = 3.5 if self.super_flyby else 1.2
+            max_pixel_size = min(LARGURA, ALTURA) * limit_scale
+            current_pixel_size = self.imagem_base.get_width() * self.escala_atual * SCALE
+            
+            # Só atualiza sprite se estiver abaixo do limite ou mudou significativamente
+            should_update = False
+            if current_pixel_size < max_pixel_size:
+                 if abs(alvo - self.escala_atual) > 0.005:
+                     should_update = True
+            
+            if self.rescale_cd <= 0.0 and should_update:
                 self._atualizar_sprite()
-                self.rescale_cd = 0.08
+                # Aumenta delay se imagem for grande (>1024)
+                if current_pixel_size > 1024:
+                    self.rescale_cd = 0.2
+                else:
+                    self.rescale_cd = 0.1
             else:
                 self.rescale_cd = max(0.0, self.rescale_cd - dt)
         if self.y > ALTURA + self.raio:

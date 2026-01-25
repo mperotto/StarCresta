@@ -76,7 +76,7 @@ class GerenciadorDeInimigos:
         quantidade = max(1, int(quantidade))
         for i in range(quantidade):
             offset = (i - (quantidade - 1) / 2.0) * 180
-            boss = Boss(LARGURA/2 - 64 + offset, -150)
+            boss = Boss(LARGURA/2 - 64 + offset, -150, fase=fase)
             boss.allow_dive = fase >= 3
             boss.dive_cooldown = random.uniform(4.5, 7.5)
             self.criar(boss)
@@ -121,7 +121,10 @@ class GerenciadorDeInimigos:
                     direcao = 1 if random.random() < 0.5 else -1
                     y = random.randint(S(60), S(160))
                     x = -S(40) if direcao == 1 else LARGURA + S(40)
-                    self.criar(DiscoVoador(x, y, velocidade=380 * speed_mult, direcao=direcao))
+                    # Velocidade escala com a fase (começa mais lento e aumenta)
+                    base_speed = 150 + (min(10, self.fase) * 25)
+                    speed_mult = 1.0 + (self.tempo_total * 0.001) # Fator tempo bem reduzido
+                    self.criar(DiscoVoador(x, y, velocidade=base_speed * speed_mult, direcao=direcao))
                 # próximo em 18–30s, mais frequente conforme o tempo
                 base_min, base_max = 18.0, 30.0
                 fator = max(0.5, 1.0 - self.tempo_total * 0.007)
@@ -293,6 +296,8 @@ class GerenciadorDeUpgrades:
         # inimigos também podem pegar upgrades
         for u in list(self.upgrades):
             for inimigo in inimigos.inimigos:
+                if isinstance(inimigo, Boss):
+                    continue
                 if inimigo.retangulo.colliderect(u.retangulo):
                     if hasattr(inimigo, 'coletar_upgrade'):
                         inimigo.coletar_upgrade(u.tipo)

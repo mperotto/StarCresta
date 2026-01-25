@@ -8,11 +8,12 @@ def processar_eventos(jogo):
         if evento.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
-        if evento.type == pygame.KEYDOWN and (evento.key == pygame.K_v or evento.key == pygame.K_F12):
+        if evento.type == pygame.KEYDOWN and evento.key == pygame.K_F12:
             try:
-                jogo.toggle_debug_viewer()
+                jogo.toggle_fps_display()
             except Exception:
                 pass
+
         if evento.type == pygame.KEYDOWN and evento.key == pygame.K_F9:
             try:
                 jogo.salvar_screenshot()

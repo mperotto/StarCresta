@@ -87,6 +87,9 @@ class Jogo:
         self.sinalizou_super_pronto = False
         self.upgrade_super_timer = 0.0  # buff temporário (s)
         self.player_shield_timer = 0.0
+        self.player_shield_layers = 0 # Camadas de força do escudo
+        self.player_shield_hits = 0   # Acumulador de dano no escudo
+        self.shield_decay_multiplier = 1.0 # Multiplicador de decaimento do tempo (acelera quando escudo fraco)
         self.vidas = 3
         self.invul_timer = 0.0
         
@@ -161,6 +164,9 @@ class Jogo:
         self.target_module = None
         self.docking_timer = 0.0
         self.docking_success = False
+        
+        # Display de FPS
+        self.fps_display_active = False
 
     def _carregar_audio(self):
         self.sfx_shot = carregar_som('laser1.wav', 0.28) or carregar_som('shot.wav', 0.28)
@@ -223,6 +229,9 @@ class Jogo:
         self.sinalizou_super_pronto = False
         self.upgrade_super_timer = 0.0
         self.player_shield_timer = 0.0
+        self.player_shield_layers = 0
+        self.player_shield_hits = 0
+        self.shield_decay_multiplier = 1.0
         self.invul_timer = 0.0
         self.game_over_fx_active = False
         self.fx_texts = []
@@ -408,10 +417,11 @@ class Jogo:
                 if self.invul_timer <= 0:
                     self.jogador.receber_dano()
                     self.vidas -= 1
-                    self.invul_timer = 2.0
+                    self.invul_timer = 4.0
                     # Zera poderes
                     self.player_shield_timer = 0.0
                     self.upgrade_super_timer = 0.0
+                    self.jogador.nivel_arma = 0
                     # Empurra jogador para o centro para não ficar preso na parede
                     self.jogador.x = LARGURA / 2 - self.jogador.largura / 2
                 
@@ -420,6 +430,7 @@ class Jogo:
                 self.vidas -= 1
                 self.player_shield_timer = 0.0
                 self.upgrade_super_timer = 0.0
+                self.jogador.nivel_arma = 0
                 cx = self.jogador.x + self.jogador.largura/2
                 cy = self.jogador.y + self.jogador.altura/2
                 self.particulas.spawn_ao_redor(cx, cy, intensidade=50, raio=40, 
@@ -490,15 +501,24 @@ class Jogo:
 
             # Disparos do planeta só em super flyby
             if self.fundo.tem_super_flyby():
-                self.planet_shot_timer -= dt
-                if self.planet_shot_timer <= 0:
-                    self.planet_shot_timer = random.uniform(0.35, 0.7)
-                    sx = LARGURA // 2
-                    sy = ALTURA // 2
-                    ground_speed = 20.0 * SCALE
-                    px = self.jogador.x + self.jogador.largura/2
-                    py = self.jogador.y + self.jogador.altura/2
-                    self.tiros_inimigos.criar(TiroPlaneta(sx, sy, px, py, ground_speed=ground_speed))
+                # Verifica se o planeta cobre o centro da tela (onde o tiro nasce)
+                planet_covering = False
+                for p in self.fundo.planetas:
+                    if getattr(p, 'super_flyby', False):
+                        if p.y + p.raio > ALTURA // 2:
+                            planet_covering = True
+                            break
+                
+                if planet_covering:
+                    self.planet_shot_timer -= dt
+                    if self.planet_shot_timer <= 0:
+                        self.planet_shot_timer = random.uniform(0.35, 0.7)
+                        sx = LARGURA // 2
+                        sy = ALTURA // 2
+                        ground_speed = 20.0 * SCALE
+                        px = self.jogador.x + self.jogador.largura/2
+                        py = self.jogador.y + self.jogador.altura/2
+                        self.tiros_inimigos.criar(TiroPlaneta(sx, sy, px, py, ground_speed=ground_speed))
         else:
             # Tenta iniciar evento aleatoriamente
             self.planet_flyby_timer -= dt
@@ -556,7 +576,8 @@ class Jogo:
             
         # Atualiza timers de power-ups
         if self.player_shield_timer > 0:
-            self.player_shield_timer = max(0.0, self.player_shield_timer - dt)
+            # Decaimento acelerado se o multiplicador for > 1.0
+            self.player_shield_timer = max(0.0, self.player_shield_timer - dt * self.shield_decay_multiplier)
 
         if self.upgrade_super_timer > 0:
             self.upgrade_super_timer = max(0.0, self.upgrade_super_timer - dt)
@@ -663,9 +684,22 @@ class Jogo:
         else:
             inimigo = self.inimigos.verificar_colisao_com_jogador(self.jogador)
             if inimigo:
-                # se for asteroide e escudo do player estiver ativo, ignora
-                if isinstance(inimigo, Asteroide) and self.player_shield_timer > 0:
-                    inimigo = None
+                # Se tiver escudo
+                if self.player_shield_timer > 0:
+                    # Lógica unificada de dano no escudo
+                    self.player_shield_hits += 1
+                    if self.player_shield_layers > 1:
+                        if self.player_shield_hits >= 10:
+                            self.player_shield_layers -= 1
+                            self.player_shield_hits = 0
+                    else:
+                        # Se só tem 1 camada, Acelera o decaimento em vez de perder tempo fixo
+                        self.shield_decay_multiplier += 0.5
+                    
+                    # Inimigo morre se nao for boss
+                    if not isinstance(inimigo, Boss):
+                        inimigo.matar()
+                    inimigo = None # Anula dano ao jogador
             if inimigo:
                 # chefão não morre por colisão com o jogador
                 if not isinstance(inimigo, Boss):
@@ -679,8 +713,9 @@ class Jogo:
                     # Ao morrer (perder vida), zera os poderes temporários
                     self.player_shield_timer = 0.0
                     self.upgrade_super_timer = 0.0
+                    self.jogador.nivel_arma = 0
                 else:
-                    self.invul_timer = 2.0 # Invencibilidade ao perder parte
+                    self.invul_timer = 4.0 # Invencibilidade ao perder parte
                     # Ao perder uma nave acoplada, também zera os poderes (conforme pedido)
                     self.player_shield_timer = 0.0
                     self.upgrade_super_timer = 0.0
@@ -729,7 +764,7 @@ class Jogo:
                     self.estado = 'game_over'
                     self._iniciar_entrada_iniciais()
                 else:
-                    self.invul_timer = 1.8
+                    self.invul_timer = 4.0
                     # anima respawn: traz a nave de baixo pra posição padrão
                     self.jogador.y = ALTURA + S(30)
                     try:
@@ -803,6 +838,9 @@ class Jogo:
                         pass
             elif efeito == 'shield':
                 self.player_shield_timer += 10.0  # Acumula tempo
+                self.player_shield_layers = 5 # Reseta para 5 camadas (força máxima)
+                self.player_shield_hits = 0
+                self.shield_decay_multiplier = 1.0 # Reseta decaimento
                 if hasattr(self, 'sfx_powerup') and self.sfx_powerup:
                     try:
                         self.sfx_powerup.play()
@@ -999,7 +1037,7 @@ class Jogo:
                             self.vidas -= 1
                         else:
                             # perdeu estágio, mas ainda tem vidas
-                            self.invul_timer = 2.0
+                            self.invul_timer = 4.0
                         cx = self.jogador.x + self.jogador.largura/2
                         cy = self.jogador.y + self.jogador.altura/2
                         if self.vidas <= 0:
@@ -1032,14 +1070,29 @@ class Jogo:
                             if hasattr(self, 'sfx_explosion_small') and self.sfx_explosion_small:
                                 try: self.sfx_explosion_small.play()
                                 except Exception: pass
-                            self.invul_timer = max(self.invul_timer, 1.8)
+                            self.invul_timer = max(self.invul_timer, 4.0)
                             # traz nave de baixo e anima subida
                             self.jogador.y = ALTURA + S(30)
                             try:
                                 self.jogador.spawn_anim = 1.2
                             except Exception:
                                 pass
-                    t.matar()
+                    else:
+                        # Escudo Ativo: Processa camadas
+                        self.player_shield_hits += 1
+                        
+                        if self.player_shield_layers > 1:
+                            # Se tem camadas de sobra, a cada 10 tiros perde 1
+                            reduction_threshold = 10
+                            if self.player_shield_hits >= reduction_threshold:
+                                self.player_shield_layers -= 1
+                                self.player_shield_hits = 0
+                                # visual/som de camada caindo (opcional)
+                        else:
+                            # Se só tem 1 camada, Acelera o decaimento
+                            self.shield_decay_multiplier += 0.5
+                        
+                        t.matar() # Tiro morre no escudo
 
         # tiros inimigos x asteroides (encolhem ou destroem; origin env)
         for t in self.tiros_inimigos.tiros:
@@ -1218,13 +1271,20 @@ class Jogo:
             self.tela.blit(fase_txt, box)
 
         upg_txt = f"{self.upgrade_super_timer:0.1f}s" if self.upgrade_super_timer > 0 else "—"
-        shield_txt = f"{self.player_shield_timer:0.1f}s" if self.player_shield_timer > 0 else "—"
+        shield_txt = f"{self.player_shield_timer:0.1f}s ({self.player_shield_layers}L)" if self.player_shield_timer > 0 else "—"
         hud = self.fonte.render(f"Pontuação: {self.pontuacao}  |  Vidas: {self.vidas}  |  Upgrade V: {upg_txt}  |  Shield: {shield_txt}", True, (220, 230, 255))
         self.tela.blit(hud, (10, 10))
         rec_name, rec_score, rec_phase = self.score_manager.get_high_holder()
         rec_phase_txt = f" F{rec_phase}" if rec_phase else ""
         rec_txt = self.fonte.render(f"REC: {rec_name} {rec_score}{rec_phase_txt}", True, (200, 210, 255))
         self.tela.blit(rec_txt, (LARGURA - rec_txt.get_width() - 10, 10))
+        
+        # FPS Display
+        if self.fps_display_active:
+            atual_fps = int(self.relogio.get_fps())
+            color = (0, 255, 0) if atual_fps >= 55 else (255, 255, 0) if atual_fps >= 30 else (255, 0, 0)
+            fps_txt = self.fonte.render(f"FPS: {atual_fps}", True, color)
+            self.tela.blit(fps_txt, (LARGURA - fps_txt.get_width() - 10, 40))
         # piscar o jogador quando invulnerável (apenas fora do planeta)
         if self.invul_timer > 0 and self.estado == 'jogando' and not self.in_planet_stage:
             if int(pygame.time.get_ticks() / 100) % 2 == 0:
@@ -1233,15 +1293,55 @@ class Jogo:
         if self.player_shield_timer > 0 and not self.in_planet_stage:
             cx = int(self.jogador.x + self.jogador.largura/2)
             cy = int(self.jogador.y + self.jogador.altura/2)
-            r = max(self.jogador.largura, self.jogador.altura)
-            # Pisca quando está acabando (últimos 3 segundos)
-            if self.player_shield_timer <= 3.0:
-                # Pisca mais rápido conforme o tempo diminui
-                flash_speed = 200 - int(self.player_shield_timer * 50)  # 200ms a 50ms
-                if int(pygame.time.get_ticks() / flash_speed) % 2 == 0:
-                    pygame.draw.circle(self.tela, (120, 200, 255), (cx, cy), int(r), 2)
+            base_r = max(self.jogador.largura, self.jogador.altura) * 0.9
+            
+            # Desenha múltiplas camadas com gap
+            camadas = max(1, self.player_shield_layers)
+            
+            # Se só tem 1 camada e pouco tempo, pisca
+            should_flash = (camadas == 1 and self.player_shield_timer <= 3.0)
+            visible = True
+            
+            if should_flash:
+                 flash_speed = 200 - int(self.player_shield_timer * 50)
+                 if int(pygame.time.get_ticks() / flash_speed) % 2 != 0:
+                     visible = False
+            
+            if visible:
+                for i in range(camadas):
+                    # Gap de 6 pixels entre camadas
+                    r = int(base_r + i * 6)
+                    # Opacidade maior nas camadas externas
+                    alpha = 100 + i * 30
+                    # Cor oscila levemente
+                    g = 200 + int(50 * math.sin(pygame.time.get_ticks() * 0.005 + i))
+                    color = (100, min(255, g), 255)
+                    pygame.draw.circle(self.tela, color, (cx, cy), r, 2)
+            
+            # Barra de tempo do escudo abaixo do jogador
+            bar_w = 40
+            bar_h = 4
+            bar_x = cx - bar_w // 2
+            bar_y = cy + base_r + 15 # Abaixo do player
+            
+            # Fundo da barra
+            pygame.draw.rect(self.tela, (50, 50, 80), (bar_x, bar_y, bar_w, bar_h))
+            
+            # Preenchimento proporcional (assumindo 10s como base cheia, mas permitindo overflow visual)
+            # Se o tempo for muito alto, a barra fica cheia
+            pct = min(1.0, self.player_shield_timer / 10.0)
+            fill_w = int(bar_w * pct)
+            
+            # Cor muda se estiver decaindo rápido
+            if self.shield_decay_multiplier > 1.5:
+                # Vermelho/Laranja piscante se estiver instável
+                mc = (255, 100, 50) if int(pygame.time.get_ticks()/100)%2==0 else (255, 200, 50)
             else:
-                pygame.draw.circle(self.tela, (120, 200, 255), (cx, cy), int(r), 2)
+                # Amarelo Ouro para destacar do Ciano do escudo
+                mc = (255, 220, 0)
+                
+            pygame.draw.rect(self.tela, mc, (bar_x, bar_y, fill_w, bar_h))
+            pygame.draw.rect(self.tela, (200, 200, 200), (bar_x, bar_y, bar_w, bar_h), 1)
             
         if self.estado == 'game_over':
             self.game_over_screen.desenhar(
@@ -1279,6 +1379,9 @@ class Jogo:
             self.tela_real.blit(self.tela, (0, 0))
             
         pygame.display.flip()
+
+    def toggle_fps_display(self):
+        self.fps_display_active = not self.fps_display_active
 
     def executar(self):
         while True:

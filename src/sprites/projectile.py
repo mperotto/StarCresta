@@ -100,7 +100,47 @@ class TiroInimigo(ObjetoDeJogo):
         self.sincronizar_retangulo()
 
     def desenhar(self, tela):
-        pygame.draw.rect(tela, (255, 100, 120), self.retangulo)
+        # Cache de animação do glow (pulsante) para evitar recalculo
+        if not hasattr(TiroInimigo, '_glow_frames'):
+             frames = []
+             # Reduzido um pouco (user reclamou que estava grande)
+             w, h = S(16), S(22)
+             
+             # Gera 16 frames de pulso
+             for i in range(16):
+                 surf = pygame.Surface((w, h), pygame.SRCALPHA)
+                 cx, cy = w//2, h//2
+                 
+                 # Fator de pulso (onda senoidal entre 0.6 e 1.0)
+                 fator = 0.6 + 0.4 * abs(math.sin(i / 16.0 * math.pi))
+                 
+                 # Cores moduladas pelo fator para funcionar bem com BLEND_RGB_ADD
+                 # Glow externo (vermelho)
+                 r1, g1, b1 = int(180 * fator), 0, 0
+                 pygame.draw.circle(surf, (r1, g1, b1, 0), (cx, cy), S(8))
+                 
+                 # Glow interno (laranja)
+                 r2, g2, b2 = int(255 * fator), int(80 * fator), int(20 * fator)
+                 pygame.draw.circle(surf, (r2, g2, b2, 0), (cx, cy), S(5))
+                 
+                 # Núcleo branco (quase sempre brilhante, pulsa menos)
+                 fator_core = 0.8 + 0.2 * fator
+                 rc, gc, bc = int(255 * fator_core), int(255 * fator_core), int(240 * fator_core)
+                 pygame.draw.rect(surf, (rc, gc, bc), (cx - S(2), cy - S(4), S(4), S(8)))
+                 
+                 frames.append(surf)
+             
+             TiroInimigo._glow_frames = frames
+        
+        # Seleciona frame baseado no tempo para todos pulsarem sincronizados (ou usar self.id para desvio)
+        # Usando tempo global fica parecendo um efeito de fase
+        frame_idx = int(pygame.time.get_ticks() / 50) % len(TiroInimigo._glow_frames)
+        glow_surf = TiroInimigo._glow_frames[frame_idx]
+        
+        cx, cy = self.retangulo.centerx, self.retangulo.centery
+        gw, gh = glow_surf.get_size()
+        
+        tela.blit(glow_surf, (cx - gw//2, cy - gh//2), special_flags=pygame.BLEND_RGB_ADD)
 
 class TiroPlaneta(ObjetoDeJogo):
     def __init__(self, x, y, player_x, player_y, ground_speed=0):
