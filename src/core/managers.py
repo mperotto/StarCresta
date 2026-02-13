@@ -66,6 +66,7 @@ class GerenciadorDeInimigos:
         self.boss_ativo = False
         self.boss_killed = False
         self.boss_killed_pos = None
+        self.boss_killed_positions = []
         self.fase = 1  # atualizado externamente para progressão
 
     def criar(self, inimigo):
@@ -73,6 +74,7 @@ class GerenciadorDeInimigos:
 
     def spawnar_boss(self, quantidade=1, fase=1):
         self.boss_ativo = True
+        self.boss_killed_positions = []
         quantidade = max(1, int(quantidade))
         for i in range(quantidade):
             offset = (i - (quantidade - 1) / 2.0) * 180
@@ -138,6 +140,7 @@ class GerenciadorDeInimigos:
                 if boss.esta_morto() and not hasattr(boss, '_morte_notificada'):
                     boss._morte_notificada = True
                     mortos_novos.append(boss)
+                    self.boss_killed_positions.append((boss.x + boss.largura/2, boss.y + boss.altura/2))
             tem_boss = any(isinstance(i, Boss) and not i.esta_morto() for i in self.inimigos)
             if (not tem_boss) and (mortos_novos or self.boss_killed):
                 ultimo = mortos_novos[-1] if mortos_novos else bosses[-1] if bosses else None
@@ -166,6 +169,7 @@ class GerenciadorDeInimigos:
     def verificar_colisoes_com_tiros(self, gerenciador_de_tiros, destrocos=None, upgrades=None):
         # Retorna quantos inimigos morreram neste passo
         abates = 0
+        boss_mortes_novas = []
         for inimigo in self.inimigos:
             if inimigo.esta_morto():
                 continue
@@ -199,6 +203,10 @@ class GerenciadorDeInimigos:
                         inimigo.receber_dano(1)
                         if estava_vivo and inimigo.esta_morto():
                             abates += 1
+                            if isinstance(inimigo, Boss):
+                                pos_boss = (inimigo.x + inimigo.largura/2, inimigo.y + inimigo.altura/2)
+                                self.boss_killed_positions.append(pos_boss)
+                                boss_mortes_novas.append(pos_boss)
                             if upgrades is not None:
                                 upgrades.drop_random(inimigo.x + inimigo.largura/2, inimigo.y + inimigo.altura/2)
                             if isinstance(inimigo, DiscoVoador):
@@ -210,6 +218,19 @@ class GerenciadorDeInimigos:
                     break
         # Remover imediatamente inimigos mortos para refletir no mesmo frame
         self.inimigos = [i for i in self.inimigos if not i.esta_morto()]
+
+        # Se era batalha de boss e nao sobrou nenhum vivo, dispara evento final uma unica vez.
+        if self.boss_ativo:
+            tem_boss_vivo = any(isinstance(i, Boss) and not i.esta_morto() for i in self.inimigos)
+            if (not tem_boss_vivo) and (boss_mortes_novas or self.boss_killed):
+                self.boss_killed = True
+                if boss_mortes_novas:
+                    self.boss_killed_pos = boss_mortes_novas[-1]
+                elif self.boss_killed_positions:
+                    self.boss_killed_pos = self.boss_killed_positions[-1]
+                self.boss_ativo = False
+                self.tempo_total += 200
+
         return abates
 
     def verificar_colisao_com_jogador(self, jogador):

@@ -166,6 +166,46 @@ class Jogo:
         
         # Display de FPS
         self.fps_display_active = False
+        # Filtro anti-vazamento de teclas entre estados (ex.: Enter do menu)
+        self.input_lock_until = 0
+        self.enter_needs_release = False
+
+    def limpar_buffer_entrada(self, bloqueio_ms=180):
+        try:
+            pygame.event.clear(pygame.KEYDOWN)
+            pygame.event.clear(pygame.KEYUP)
+        except Exception:
+            try:
+                pygame.event.clear()
+            except Exception:
+                pass
+        try:
+            keys = pygame.key.get_pressed()
+            self.enter_needs_release = bool(keys[pygame.K_RETURN] or keys[pygame.K_KP_ENTER])
+        except Exception:
+            self.enter_needs_release = False
+        try:
+            now = pygame.time.get_ticks()
+            self.input_lock_until = max(self.input_lock_until, now + int(bloqueio_ms))
+        except Exception:
+            self.input_lock_until = 0
+
+    def entrada_bloqueada(self):
+        try:
+            return pygame.time.get_ticks() < self.input_lock_until
+        except Exception:
+            return False
+
+    def enter_confirmado(self):
+        if self.entrada_bloqueada():
+            return False
+        keys = pygame.key.get_pressed()
+        enter_pressionado = bool(keys[pygame.K_RETURN] or keys[pygame.K_KP_ENTER])
+        if self.enter_needs_release:
+            if not enter_pressionado:
+                self.enter_needs_release = False
+            return False
+        return enter_pressionado
 
     def _carregar_audio(self):
         self.sfx_shot = carregar_som('laser1.wav', 0.28) or carregar_som('shot.wav', 0.28)
@@ -258,8 +298,10 @@ class Jogo:
         # reiniciar música normal
         self._tocar_musica(self.music_path)
         self.estado = 'jogando'
+        self.limpar_buffer_entrada(220)
 
     def _iniciar_entrada_iniciais(self):
+        self.limpar_buffer_entrada(220)
         self.entering_initials = self.score_manager.qualifica(self.pontuacao)
         self.initials_input = ""
         self.new_score_registered = not self.entering_initials
@@ -272,6 +314,7 @@ class Jogo:
         self.score_manager.registrar(nome, self.pontuacao, fase=self.fase)
         self.entering_initials = False
         self.new_score_registered = True
+        self.limpar_buffer_entrada(220)
 
     def _desenhar_banner_fase(self):
         if self.fase_banner_timer > 0.0 and not self.in_planet_stage:
@@ -306,6 +349,19 @@ class Jogo:
                     self._tocar_musica(self.boss_music_path)
 
 
+        # Explosao individual por boss morto (2-3 bosses simultaneos)
+        boss_killed_positions = getattr(self.inimigos, 'boss_killed_positions', None)
+        if boss_killed_positions:
+            for cx, cy in boss_killed_positions:
+                cores = [(255, 150, 50), (255, 200, 100), (255, 255, 200)]
+                self.particulas.spawn_ao_redor(cx, cy, intensidade=32, raio=42, cores=cores, vel_base=120, vel_var=180)
+                self.particulas.spawn_ao_redor(cx, cy, intensidade=20, raio=62, cores=cores, vel_base=100, vel_var=150)
+                if hasattr(self, 'sfx_explosion_big') and self.sfx_explosion_big:
+                    try:
+                        self.sfx_explosion_big.play()
+                    except Exception:
+                        pass
+            self.inimigos.boss_killed_positions = []
         # Boss morto: explosão épica e volta música normal
         if getattr(self.inimigos, 'boss_killed', False):
             self.inimigos.boss_killed = False
@@ -470,7 +526,7 @@ class Jogo:
             if not self.inimigos.boss_ativo and self.estado == 'jogando':
                 # Input para entrar no planeta (ENTER)
                 keys = pygame.key.get_pressed()
-                if keys[pygame.K_RETURN]: 
+                if self.enter_confirmado():
                     # Permite entrada apenas em super flyby; sem escudo explode mais tarde
                     self.in_planet_stage = True
                     # Seleciona imagem do maior planeta super flyby visível
@@ -481,7 +537,7 @@ class Jogo:
                             if p.raio > best_r:
                                 best_r = p.raio
                                 planet_img = p.imagem_base
-                    self.planet_stage.start(planet_img, no_shield=(self.player_shield_timer <= 0))
+                    self.planet_stage.start(planet_img, no_shield=(self.player_shield_layers <= 0))
                     # Limpa inimigos do espaço para evitar conflitos
                     self.inimigos.inimigos.clear()
                     self.tiros_inimigos.tiros.clear()
@@ -491,8 +547,8 @@ class Jogo:
                 
                 # Renderiza texto de aviso (piscando)
                 if int(pygame.time.get_ticks() / 400) % 2 == 0:
-                    color = (0, 255, 0) if self.player_shield_timer > 0 else (255, 180, 60)
-                    msg = "PRESS ENTER TO DESCEND" if self.player_shield_timer > 0 else "ENTER TO DESCEND (HOT!)"
+                    color = (0, 255, 0) if self.player_shield_layers > 0 else (255, 180, 60)
+                    msg = "PRESS ENTER TO DESCEND" if self.player_shield_layers > 0 else "ENTER TO DESCEND (HOT!)"
                     
                     txt = self.fonte.render(msg, True, color)
                     # Centralizado na parte inferior
@@ -553,6 +609,19 @@ class Jogo:
             return
 
         if self.estado != 'jogando':
+            # Em game over, mantem a cena em movimento no fundo (sem logica de combate).
+            if self.estado == 'game_over' and not self.in_planet_stage:
+                # Slow motion curto logo apos a explosao final.
+                dt_bg = dt * (0.65 if getattr(self, 'game_over_fx_t', 0.0) < 1.8 else 1.0)
+                self.tiros.atualizar(dt_bg)
+                self.tiros_inimigos.atualizar(dt_bg)
+                for inimigo in self.inimigos.inimigos:
+                    inimigo.atualizar(dt_bg)
+                self.inimigos.inimigos = [i for i in self.inimigos.inimigos if not i.esta_morto()]
+                for upgrade in self.upgrades.upgrades:
+                    upgrade.atualizar(dt_bg)
+                self.upgrades.upgrades = [u for u in self.upgrades.upgrades if not u.esta_morto()]
+
             # Atualiza FX de Game Over (explosão lenta)
             if getattr(self, 'game_over_fx_active', False):
                 self.game_over_fx_t += dt
@@ -750,9 +819,9 @@ class Jogo:
                     elif hasattr(self, 'sfx_explosion_small') and self.sfx_explosion_small:
                         try: self.sfx_explosion_small.play()
                         except Exception: pass
-                    # fade na música ao entrar em game over
+                    # Evita travar o loop: fadeout do pygame pode ser bloqueante aqui.
                     try:
-                        pygame.mixer.music.fadeout(1200)
+                        pygame.mixer.music.stop()
                     except Exception:
                         pass
                     # inicia FX de Game Over mais lenta
@@ -828,7 +897,7 @@ class Jogo:
                                     try: self.sfx_explosion_small.play()
                                     except Exception: pass
                                 try:
-                                    pygame.mixer.music.fadeout(1200)
+                                    pygame.mixer.music.stop()
                                 except Exception:
                                     pass
                                 self.game_over_fx_active = True
@@ -999,6 +1068,19 @@ class Jogo:
                 else:
                     self.inimigos.criar(InimigoDescendo(x, -26, velocidade=90))
 
+        # Explosao individual por boss morto (2-3 bosses simultaneos)
+        boss_killed_positions = getattr(self.inimigos, 'boss_killed_positions', None)
+        if boss_killed_positions:
+            for cx, cy in boss_killed_positions:
+                cores = [(255, 150, 50), (255, 200, 100), (255, 255, 200)]
+                self.particulas.spawn_ao_redor(cx, cy, intensidade=32, raio=42, cores=cores, vel_base=120, vel_var=180)
+                self.particulas.spawn_ao_redor(cx, cy, intensidade=20, raio=62, cores=cores, vel_base=100, vel_var=150)
+                if hasattr(self, 'sfx_explosion_big') and self.sfx_explosion_big:
+                    try:
+                        self.sfx_explosion_big.play()
+                    except Exception:
+                        pass
+            self.inimigos.boss_killed_positions = []
         # Boss morto: explosão épica e volta música normal
         boss_dead_event = False
         pos = None
@@ -1116,7 +1198,7 @@ class Jogo:
                                 try: self.sfx_explosion_small.play()
                                 except Exception: pass
                             try:
-                                pygame.mixer.music.fadeout(1200)
+                                pygame.mixer.music.stop()
                             except Exception:
                                 pass
                             # inicia FX de Game Over mais lenta
@@ -1231,6 +1313,7 @@ class Jogo:
 
         if self.estado == 'celebration':
             self.jogador.desenhar(self.tela)
+            self.particulas.desenhar(self.tela)
             
             # Texto de comemoração
             txt = self.fonte_grande.render("BOSS DESTROYED!", True, (255, 215, 0))
@@ -1284,8 +1367,6 @@ class Jogo:
             else:
                 self.jogador.desenhar(self.tela)
             
-        self.particulas.desenhar(self.tela)
-        
         if self.in_planet_stage:
             self.planet_stage.draw_cockpit(self.tela)
 
@@ -1300,6 +1381,8 @@ class Jogo:
             self.tiros.desenhar(self.tela)
             self.tiros_inimigos.desenhar(self.tela)
             self.inimigos.desenhar(self.tela)
+            # Particulas em primeiro plano para manter explosoes visiveis
+            self.particulas.desenhar(self.tela)
         
         # desenhar textos flutuantes (ex.: +1 VIDA)
         for fx in self.fx_texts:
@@ -1392,7 +1475,6 @@ class Jogo:
                 
             pygame.draw.rect(self.tela, mc, (bar_x, bar_y, fill_w, bar_h))
             pygame.draw.rect(self.tela, (200, 200, 200), (bar_x, bar_y, bar_w, bar_h), 1)
-            
         if self.estado == 'game_over':
             self.game_over_screen.desenhar(
                 self.tela,
@@ -1401,7 +1483,9 @@ class Jogo:
                 entering_initials=self.entering_initials,
                 initials_input=self.initials_input
             )
-            # anéis da explosão final por cima do overlay
+            # Mantem as particulas da explosao visiveis sobre o overlay de Game Over
+            self.particulas.desenhar(self.tela)
+            # aneis da explosao final por cima do overlay
             if getattr(self, 'game_over_fx_active', False):
                 cx, cy = self.game_over_fx_pos
                 t = self.game_over_fx_t
@@ -1609,7 +1693,7 @@ class Jogo:
         if keys[pygame.K_DELETE] or keys[pygame.K_j] or keys[pygame.K_KP_PERIOD]: self.debug_model_rot[0] -= rot_speed
         
         # Eixo Y: Home/End ou I/K ou Numpad 7/1
-        if keys[pygame.K_HOME] or keys[pygame.K_i] or keys[pygame.K_KP7]:   self.debug_model_rot[1] += rot_speed
+        if keys[pygame.K_HOME] or keys[pygame.K_KP7]:   self.debug_model_rot[1] += rot_speed
         if keys[pygame.K_END] or keys[pygame.K_k] or keys[pygame.K_KP1]:    self.debug_model_rot[1] -= rot_speed
         
         # Eixo Z: PgUp/PgDn ou O/L ou Numpad 9/3
